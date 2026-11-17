@@ -1,8 +1,9 @@
 import { Reorder, useDragControls } from 'framer-motion'
-import { Download, GripVertical, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { Download, GripVertical, Plus, RotateCcw, Smartphone, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, PageHeader, SectionTitle } from '@/components/common'
+import { InstallSheet } from '@/components/install'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
@@ -20,6 +21,7 @@ export function SettingsScreen() {
   const [editing, setEditing] = useState<Editing>(null)
   const [deleting, setDeleting] = useState<Member | null>(null)
   const [confirm, setConfirm] = useState<null | { kind: 'reset' } | { kind: 'import'; text: string }>(null)
+  const [installOpen, setInstallOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   // 드래그 중에는 로컬 상태로 부드럽게, 드롭 시점에 저장
   const [order, setOrder] = useState<string[] | null>(null)
@@ -72,6 +74,13 @@ export function SettingsScreen() {
         </Card>
 
         <Card>
+          <SectionTitle>앱</SectionTitle>
+          <Button variant="soft" className="w-full justify-start" onClick={() => setInstallOpen(true)}>
+            <Smartphone size={18} /> 앱 설치 방법
+          </Button>
+        </Card>
+
+        <Card>
           <SectionTitle>데이터</SectionTitle>
           <p className="mb-3 text-[13px] leading-relaxed text-ink-2">
             이 기기의 브라우저에 저장돼요. 다른 기기로 옮기거나 백업하려면 파일로 내보내 주세요.
@@ -92,6 +101,7 @@ export function SettingsScreen() {
         <p className="pb-2 text-center text-xs text-ink-2">커피 당번 · 서버 없이 이 브라우저에서만 동작해요</p>
       </div>
 
+      <InstallSheet open={installOpen} onOpenChange={setInstallOpen} />
       <MemberEditor editing={editing} onClose={() => setEditing(null)} />
 
       <Sheet open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={`${deleting?.name ?? ''}님을 삭제할까요?`} description="휴가 기록은 함께 지워지고, 과거 구매 기록은 '탈퇴한 멤버'로 남아요.">

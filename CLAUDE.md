@@ -34,6 +34,12 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 애니메이션은 `MotionConfig reducedMotion="user"` + CSS `prefers-reduced-motion`으로 최소화, 컨페티는 `disableForReducedMotion`.
 - 화면: `src/screens/` (home, history, absences, stats, settings). 탭 전환은 `App.tsx`에서 방향별 슬라이드.
 
+## PWA 설치 안내
+- `src/lib/install.ts`: `detectEnv`(standalone / 인앱 / iOS / 기타 판별, 순수 함수), `isDismissed`(7일 숨김, localStorage `coffee-duty:install-dismissed`), `useInstall`. `beforeinstallprompt`/`appinstalled`는 React 마운트 전에 올 수 있어 **모듈 로드 시점**에 잡아 보관한다.
+- `src/components/install.tsx`: 홈 하단 `InstallBanner`(Android 설치 창 / iOS 안내 / 인앱 브라우저 안내)와 환경별 `InstallSheet`. 설정 화면의 "앱 설치 방법"도 같은 시트를 연다.
+- standalone(설치된 앱)으로 실행 중이면 배너를 띄우지 않는다. 안드로이드 카카오톡은 `kakaotalk://web/openExternal?url=` 로 외부 브라우저를 연다.
+- 테스트: `src/lib/install.test.ts` (UA 판별, 7일 경계). 실제 기기에서의 설치 흐름은 자동 테스트하지 못했다.
+
 ## 상태
 - 로직 테스트 27/27 통과, `tsc` 및 `vite build` 통과 (PWA SW/manifest 생성 확인).
 - **미확인**: 브라우저에서의 실제 렌더링/제스처(스와이프, 드래그 정렬, 컨페티, 바텀시트)와 모바일 375px 레이아웃은 아직 눈으로 확인하지 못했다.

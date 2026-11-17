@@ -4,6 +4,7 @@ import { useRef, useState, type CSSProperties } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, SectionTitle } from '@/components/common'
 import { CoffeeCup, EmptyCup, LogoMark } from '@/components/illustrations'
+import { InstallBanner } from '@/components/install'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
@@ -244,6 +245,8 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
       <Button variant="soft" size="lg" className="mt-4 w-full" onClick={share}>
         <Copy size={19} /> 메신저 공유용 텍스트 복사
       </Button>
+
+      <InstallBanner className="mt-4" />
 
       {/* ───── 다른 사람이 샀어요 ───── */}
       <Sheet
