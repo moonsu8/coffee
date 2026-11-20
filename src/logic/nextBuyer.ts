@@ -1,11 +1,26 @@
-import type { Absence, DateStr, Member, Purchase } from '../types'
+import type { Absence, BuyerRule, DateStr, Member, Purchase } from '../types'
 import { addDays, isWeekend } from './dates'
+import { balanceWindow, balancesOf, computeFairness, isValidPricing } from './fairness'
 
 export interface BuyerContext {
   members: Member[]
   purchases: Purchase[]
   absences: Absence[]
   skipDays: DateStr[]
+  /** 없으면 횟수 기준(기존 동작). 'balance'면 차액이 가장 작은 사람이 먼저 */
+  settings?: { buyerRule: BuyerRule; balanceSince?: DateStr }
+  /** 예상 순번 시뮬레이션용: 가상으로 산 사람을 뒤로 보내는 보정값 (직접 넘기지 않는다) */
+  balanceBias?: ReadonlyMap<string, number>
+}
+
+/**
+ * 차액 기준일 때 date의 순번에 쓰는 차액. date '이전'(당일 제외)이고 balanceSince 이후인 기록만 쓴다.
+ * 통계 탭의 기간 토글과는 무관하다.
+ */
+export function effectiveBalances(date: DateStr, ctx: BuyerContext): Map<string, number> {
+  const base = balancesOf(computeFairness(ctx.members, ctx.purchases, balanceWindow(ctx.settings, date)))
+  for (const [id, b] of ctx.balanceBias ?? []) base.set(id, (base.get(id) ?? 0) + b)
+  return base
 }
 
 export interface RankedMember {
@@ -49,7 +64,13 @@ export function rankMembers(date: DateStr, ctx: BuyerContext): RankedMember[] {
     lastPurchase: lastPurchaseDate(member.id, ctx.purchases, date),
     absent: isAbsent(member.id, date, ctx.absences),
   }))
+  const balances = ctx.settings?.buyerRule === 'balance' ? effectiveBalances(date, ctx) : null
   ranked.sort((a, b) => {
+    if (balances) {
+      // 차액이 작은(덜 낸) 사람이 먼저. 같으면 아래의 횟수 기준 규칙으로
+      const diff = (balances.get(a.member.id) ?? 0) - (balances.get(b.member.id) ?? 0)
+      if (diff !== 0) return diff
+    }
     if (a.lastPurchase !== b.lastPurchase) {
       if (a.lastPurchase === null) return -1
       if (b.lastPurchase === null) return 1
@@ -80,15 +101,30 @@ export function nextBusinessDay(date: DateStr, skipDays: DateStr[]): DateStr {
 export function forecastBuyers(from: DateStr, count: number, ctx: BuyerContext): ForecastDay[] {
   const result: ForecastDay[] = []
   const simulated = [...ctx.purchases]
+  const balanceMode = ctx.settings?.buyerRule === 'balance'
+  const bias = new Map<string, number>(ctx.balanceBias ?? [])
+  const run = (): BuyerContext => ({ ...ctx, purchases: simulated, balanceBias: bias })
+  // 차액 기준의 예상: 가상 구매에는 금액이 없어 차액이 변하지 않으므로,
+  // 산 것으로 가정한 사람을 가장 뒤로 보내 한 바퀴 도는 순서(추정)를 만든다
+  const pushBack = (day: DateStr, id: string) => {
+    const eff = effectiveBalances(day, run())
+    const max = Math.max(0, ...ctx.members.map((m) => eff.get(m.id) ?? 0))
+    bias.set(id, (bias.get(id) ?? 0) + (max - (eff.get(id) ?? 0)) + 1)
+  }
   let date = nextBusinessDay(from, ctx.skipDays)
   while (result.length < count) {
     const recorded = ctx.purchases.find((p) => p.date === date)
     if (recorded) {
       result.push({ date, memberId: recorded.memberId, actual: true })
+      // 금액이 기록된 날은 실제 차액에 이미 반영된다. 금액이 없을 때만 뒤로 보낸다
+      if (balanceMode && !isValidPricing(recorded.pricing)) pushBack(date, recorded.memberId)
     } else {
-      const buyer = getNextBuyer(date, { ...ctx, purchases: simulated })
+      const buyer = getNextBuyer(date, run())
       result.push({ date, memberId: buyer?.id ?? null, actual: false })
-      if (buyer) simulated.push({ date, memberId: buyer.id })
+      if (buyer) {
+        simulated.push({ date, memberId: buyer.id })
+        if (balanceMode) pushBack(date, buyer.id)
+      }
     }
     date = nextBusinessDay(addDays(date, 1), ctx.skipDays)
   }

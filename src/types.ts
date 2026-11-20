@@ -23,10 +23,46 @@ export interface Member {
   emoji?: string // 아바타 이모지
   favorite?: Order // 기본 메뉴
 }
+/** 금액 기록 방식. 기록에 pricing이 없으면 'none'(금액 없음) */
+export type PriceMode = 'none' | 'detail' | 'simple'
+export type BuyerRule = 'count' | 'balance'
+export const DEFAULT_BRAND = 'default' // 카페 브랜드 개념이 생기기 전까지 쓰는 고정 ID
+
+/** 우리 팀 가격표 한 줄. 사용자가 입력한 값만 저장한다 (앱이 가격을 제공하지 않음) */
+export interface PriceEntry {
+  cafeBrandId: string
+  menu: string
+  temp: Temp
+  size: string // 사이즈를 안 고르면 ''
+  price: number // 원
+  updatedAt: number
+}
+export interface PricingLine {
+  memberId: string
+  menu: string
+  temp: Temp
+  size?: Size
+  price: number
+}
+/** 구매 금액. 기록 시점의 메뉴·가격을 그대로 굳혀서 저장 (가격표를 나중에 고쳐도 지난 계산은 불변) */
+export interface Pricing {
+  mode: 'detail' | 'simple'
+  total: number // 영수증 총액(원)
+  lines?: PricingLine[] // detail: 메뉴별 가격
+  participants?: string[] // simple: 마신 사람
+}
+
 export interface Purchase {
   date: DateStr // 하루 1건 (date가 키)
   memberId: string
   memo?: string
+  pricing?: Pricing
+}
+
+export interface Settings {
+  buyerRule: BuyerRule // 당번 기준: 횟수(기본) / 차액
+  defaultPriceMode: PriceMode // [샀어요] 때 금액 입력 방식의 기본값
+  balanceSince?: DateStr // 차액 계산 시작일(포함). 이 날짜 이후 기록만 당번 계산에 쓴다
 }
 export interface Absence {
   id: string
@@ -54,5 +90,7 @@ export interface AppData {
   skipDays: DateStr[]
   orders: DayOrder[]
   customMenus: string[] // 프리셋 외에 사용자가 추가한 메뉴
+  priceList: PriceEntry[] // 우리 팀 가격표
+  settings: Settings
   updatedAt: number // 마지막 수정 시각(ms). 내보낸 파일끼리 최신 여부를 구분하는 용도
 }

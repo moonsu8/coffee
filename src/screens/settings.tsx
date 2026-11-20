@@ -2,19 +2,23 @@ import { Reorder, useDragControls } from 'framer-motion'
 import { Download, GripVertical, Plus, RotateCcw, Smartphone, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
-import { Card, PageHeader, SectionTitle } from '@/components/common'
+import { Card, PageHeader, Segmented, SectionTitle } from '@/components/common'
+import { NumberInput } from '@/components/number-input'
 import { InstallSheet } from '@/components/install'
 import { fieldsFromOrder, OrderFields, orderFromFields } from '@/components/order-fields'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
 import { downloadJson } from '@/lib/data'
+import { won } from '@/lib/format'
 import { readMetrics } from '@/lib/metrics'
+import { formatMD } from '@/logic/dates'
+import { nextSettlementDate, priceKey } from '@/logic/fairness'
 import { PRESET_MENUS } from '@/logic/menu'
 import { MEMBER_COLORS, MEMBER_EMOJIS, memberStyle, suggestStyle } from '@/lib/members'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/store'
-import type { Member } from '@/types'
+import type { BuyerRule, Member, PriceEntry, PriceMode } from '@/types'
 
 type Editing = { mode: 'add' } | { mode: 'edit'; member: Member } | null
 
@@ -116,6 +120,9 @@ export function SettingsScreen() {
             </Button>
           </form>
         </Card>
+
+        <BuyerRuleCard />
+        <PriceListCard />
 
         <Card>
           <SectionTitle>앱</SectionTitle>
@@ -360,6 +367,155 @@ function UsageStats() {
         ))}
       </dl>
       <p className="mt-2 text-[13px] leading-relaxed text-ink-2">이 기기에만 저장되고 어디로도 전송되지 않아요.</p>
+    </Card>
+  )
+}
+
+/** 당번 기준(횟수/차액), 정산, 금액 입력 기본값 */
+function BuyerRuleCard() {
+  const { data, today, setSettings, settleBalance } = useStore()
+  const toast = useToast()
+  const { buyerRule, defaultPriceMode, balanceSince } = data.settings
+  const [confirm, setConfirm] = useState(false)
+  const nextStart = nextSettlementDate(today, data.purchases)
+
+  const modeOptions: { value: PriceMode; label: string }[] = [
+    ...(buyerRule === 'balance' ? [] : [{ value: 'none' as PriceMode, label: '없음' }]),
+    { value: 'detail', label: '상세' },
+    { value: 'simple', label: '간단' },
+  ]
+
+  return (
+    <Card>
+      <SectionTitle>당번 기준</SectionTitle>
+      <Segmented<BuyerRule>
+        id="buyer-rule"
+        value={buyerRule}
+        onChange={(v) => setSettings({ buyerRule: v })}
+        options={[
+          { value: 'count', label: '횟수' },
+          { value: 'balance', label: '차액' },
+        ]}
+      />
+      <p className="mt-3 text-[13px] leading-relaxed text-ink-2">
+        {buyerRule === 'count'
+          ? '가장 오래 안 산 사람이 다음 당번이에요.'
+          : '낸 돈이 마신 돈보다 가장 적은(차액이 가장 작은) 사람이 다음 당번이에요. 차액이 같으면 오래 안 산 사람이 먼저예요. 금액 없는 기록은 계산에서 빠져서, [샀어요]에서 금액을 꼭 적어야 해요.'}
+      </p>
+
+      {buyerRule === 'balance' && (
+        <div className="mt-4 rounded-2xl bg-surface-2 p-3.5">
+          <p className="text-[15px]">
+            계산 시작일 <b>{balanceSince ? formatMD(balanceSince) : '처음부터'}</b>
+            <span className="text-ink-2"> · 이 날 이후 기록만 당번 계산에 써요</span>
+          </p>
+          <Button variant="outline" className="mt-3 w-full" onClick={() => setConfirm(true)}>
+            정산 완료, 오늘부터 다시 계산
+          </Button>
+        </div>
+      )}
+
+      <p className="mt-5 mb-2 text-sm font-semibold text-ink-2">[샀어요] 때 금액 입력</p>
+      <Segmented<PriceMode>
+        id="price-mode"
+        value={defaultPriceMode}
+        onChange={(v) => setSettings({ defaultPriceMode: v })}
+        options={modeOptions}
+      />
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
+        {defaultPriceMode === 'none' ? '금액을 묻지 않고 한 번 탭으로 기록해요.' : '[샀어요]를 누르면 금액 입력 창이 열려요.'}
+      </p>
+
+      <Sheet
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="정산을 완료할까요?"
+        description={`지금까지의 낸 돈·마신 돈은 정산된 것으로 보고, ${formatMD(nextStart)} 기록부터 차액을 다시 계산해요. 지난 구매 기록은 지워지지 않아요.`}
+      >
+        <div className="flex gap-2 pt-2">
+          <Button variant="soft" size="lg" className="flex-1" onClick={() => setConfirm(false)}>
+            취소
+          </Button>
+          <Button
+            size="lg"
+            className="flex-1"
+            onClick={() => {
+              settleBalance()
+              setConfirm(false)
+              toast({ message: `${formatMD(nextStart)}부터 다시 계산해요`, duration: 3000 })
+            }}
+          >
+            정산 완료
+          </Button>
+        </div>
+      </Sheet>
+    </Card>
+  )
+}
+
+/** 우리 팀 가격표 (사용자가 입력한 값만) */
+function PriceListCard() {
+  const { data, savePrices, removePrice } = useStore()
+  const [editing, setEditing] = useState<PriceEntry | null>(null)
+  const [value, setValue] = useState('')
+  const list = [...data.priceList].sort((a, b) => a.menu.localeCompare(b.menu, 'ko') || a.temp.localeCompare(b.temp) || a.size.localeCompare(b.size))
+  const label = (e: PriceEntry) => `${e.menu} · ${e.temp === 'hot' ? '따뜻' : '아이스'}${e.size ? ` · ${e.size}` : ''}`
+
+  return (
+    <Card>
+      <SectionTitle>가격표</SectionTitle>
+      {list.length === 0 ? (
+        <p className="text-[13px] leading-relaxed text-ink-2">
+          아직 비어 있어요. [샀어요]에서 메뉴 가격을 적으면 여기에 쌓이고, 다음 주문부터 자동으로 채워져요. 앱이 가격을 미리 넣어 두지는 않아요.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {list.map((e) => (
+            <li key={priceKey(e)}>
+              <button
+                onClick={() => {
+                  setEditing(e)
+                  setValue(String(e.price))
+                }}
+                aria-label={`${label(e)} ${won(e.price)} 수정`}
+                className="flex min-h-12 w-full items-center justify-between gap-3 text-left"
+              >
+                <span className="min-w-0 truncate text-[15px] font-semibold">{label(e)}</span>
+                <span className="shrink-0 text-[15px] font-bold">{won(e.price)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)} title={editing ? label(editing) : '가격'} description="가격표에서 고치거나 지울 수 있어요. 지난 기록의 금액은 바뀌지 않아요.">
+        <div className="space-y-4 pb-2">
+          <NumberInput label="가격" value={value} onChange={setValue} />
+          <div className="flex gap-2">
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={() => {
+                if (editing) removePrice(priceKey(editing))
+                setEditing(null)
+              }}
+            >
+              삭제
+            </Button>
+            <Button
+              size="lg"
+              className="flex-1"
+              disabled={!value}
+              onClick={() => {
+                if (editing) savePrices([{ menu: editing.menu, temp: editing.temp, size: editing.size, price: Number(value) }])
+                setEditing(null)
+              }}
+            >
+              저장
+            </Button>
+          </div>
+        </div>
+      </Sheet>
     </Card>
   )
 }

@@ -9,6 +9,8 @@ export const EMPTY_DATA: AppData = {
   skipDays: [],
   orders: [],
   customMenus: [],
+  priceList: [],
+  settings: { buyerRule: 'count', defaultPriceMode: 'none' },
   updatedAt: 0,
 }
 

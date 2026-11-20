@@ -49,6 +49,17 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - UI: `components/order-card.tsx`(홈 카드, 멤버별 바텀시트, 복사 실패 시 텍스트 대체 시트, 기록 화면의 접이식 `OrderHistory`), `components/order-fields.tsx`(오늘 변경/기본 메뉴 지정 공용 폼). 새 색상은 추가하지 않았다.
 - 사용 지표(`lib/metrics.ts`): 키 `coffee-duty:metrics`에 복사 횟수·사용한 날짜·당일 변경 횟수. 앱 데이터와 분리(내보내기/가져오기/초기화에 섞이지 않음), 외부 전송 없음. 설정 맨 아래 "사용 통계(이 기기)".
 
+## 메뉴별 금액 · 공평성 (커피 수지)
+- 데이터(스키마 버전은 v2 그대로, 누락 시 기본값으로 정규화): `Purchase.pricing?`(없으면 "금액 없음" = 기존 기록 그대로), `AppData.priceList`(우리 팀 가격표, 사용자가 입력한 값만), `AppData.settings`(`buyerRule` 'count'|'balance', `defaultPriceMode`, `balanceSince`). `cafeBrandId`는 브랜드 개념이 생기기 전까지 상수 `'default'`.
+- **앱은 가격을 미리 제공하지 않는다.** `public/data.json`의 `priceList`는 비어 있고 테스트(`pricing-migrate.test.ts`)가 이를 확인한다.
+- 기록에는 메뉴·가격을 그 시점 값으로 굳혀 저장한다(상세: `lines`, 간단: `participants`). 가격표를 나중에 고쳐도 지난 계산은 바뀌지 않는다.
+- `logic/fairness.ts`(순수 함수): `allocate`(영수증 총액을 가격 비율로 반올림 배분, 끝전은 결제자=그날 당번의 "마신 돈"에 더함 → 모든 행의 차액 합은 항상 0), `computeFairness`(낸 돈/마신 돈/차액, 금액 없음·불완전 기록은 제외하고 건수 반환, 탈퇴 멤버는 한 행으로 합산), 가격표(`lookupPrice`/`diffPrices`/`upsertPrices`), 모드 규칙(`allowedModes`/`needsPriceSheet`/`defaultModeFor`/`warnsOnClear`). 차액 = 낸 돈 − 마신 돈(플러스 = 더 냄).
+- `logic/pricing-form.ts`: 금액 폼의 순수 로직(`initPricingForm` 가격표 자동 채움, `buildPricing`). UI는 `components/pricing-fields.tsx`, 홈 시트 `components/price-sheet.tsx`, 기록 편집 시트(`screens/history.tsx`).
+- **당번 기준 "차액"**: `nextBuyer.ts`의 `BuyerContext.settings`가 있고 `buyerRule === 'balance'`면 차액이 가장 작은 사람이 먼저(동률이면 기존 횟수 규칙). `settings`가 없으면 기존 횟수 기준 그대로. 순번용 차액은 **`balanceSince` 이후, 계산 날짜 이전 기록만** 쓰고 통계 탭의 기간 토글과는 분리. 예상 순번(`forecastBuyers`)은 가상 구매에 금액이 없어 산 사람을 뒤로 보내는 "추정".
+- `balanceSince`: 차액 기준을 처음 켤 때 오늘로 설정(이미 있으면 유지). "정산 완료, 오늘부터 다시 계산"은 `nextSettlementDate`: 오늘 이미 기록된 구매가 있으면 내일부터, 없으면 오늘부터 센다(정산된 기록이 다시 잡히지 않도록).
+- 차액 기준에서는 [샀어요]의 "금액 없음"이 선택지에 없고(항상 금액 시트), 금액 기본값 '없음'은 '상세'로 바뀐다. 지난 기록 편집에서 `balanceSince` 이후 기록의 금액을 지우면 "차액 계산에서 빠져 당번 순서가 달라질 수 있어요" 경고. 통계 "커피 수지" 카드는 멤버 순서로만 표시(순위·강조 없음), `balanceSince` 이후 금액 없는 기록이 있으면 건수를 경고로 표시.
+- 횟수 기준 + 금액 기본값 "없음"(기본)이면 [샀어요]는 예전처럼 한 번 탭으로 기록된다.
+
 ## 데이터 마이그레이션 (중요: 기존 기록을 잃지 않는 것이 최우선)
 - `lib/migrate.ts`의 `migrate()`가 localStorage·JSON 가져오기·`data.json` 모두의 단일 진입점(`parseAppData`). 단계(`STEPS`)를 한 칸씩 올린다. **구조를 바꾸면 `SCHEMA_VERSION`을 올리고 단계 함수와 테스트를 추가한다.**
 - v1 → v2: 기존 필드는 값 그대로 보존하고 새 필드만 채운다. 멤버 `order` 값은 재번호하지 않고, 탈퇴한 멤버의 구매·휴가 기록도 버리지 않으며, 휴가 from/to도 뒤집지 않는다.
@@ -60,8 +71,8 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 71개 통과(`nextBuyer` 27, `order`, `migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
-- **미확인**: 주문 카드·바텀시트·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
+- 테스트 128개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- **미확인**: 주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)
 - 주소: `https://<아이디>.github.io/coffee/` (저장소 이름이 `coffee`일 때). 저장소는 public.

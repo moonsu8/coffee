@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AppData, DateStr, DayOrder, Member, Order, OrderItem, Purchase } from '../types'
+import type { AppData, DateStr, DayOrder, Member, Order, OrderItem, Purchase, Settings } from '../types'
 import { EMPTY_DATA, loadInitialData, parseAppData, saveData } from '../lib/data'
 import { suggestStyle } from '../lib/members'
 import { uid } from '../lib/utils'
 import { today as todayStr } from '../logic/dates'
+import { nextSettlementDate, priceKey, upsertPrices, type PriceInput } from '../logic/fairness'
 
 type MemberPatch = Partial<Pick<Member, 'name' | 'color' | 'emoji'>> & { favorite?: Order | null }
 
@@ -30,6 +31,13 @@ interface Store {
   snapshotOrder: (date: DateStr, items: OrderItem[]) => void
   addCustomMenu: (name: string) => void
   removeCustomMenu: (name: string) => void
+  /** 가격표에 저장 (새 항목은 추가, 같은 항목은 가격 갱신) */
+  savePrices: (inputs: PriceInput[]) => void
+  removePrice: (key: string) => void
+  /** 당번 기준 등 설정. 차액 기준을 켜면 balanceSince가 없을 때 오늘로 정하고, 금액 기본값 '없음'은 '상세'로 바꾼다 */
+  setSettings: (patch: Partial<Settings>) => void
+  /** 정산 완료: 이 시점까지의 기록은 빼고 다시 계산 (balanceSince 갱신) */
+  settleBalance: () => void
   importJson: (text: string) => void
   resetToInitial: () => Promise<void>
 }
@@ -193,6 +201,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (n) set((d) => (d.customMenus.includes(n) ? d : { ...d, customMenus: [...d.customMenus, n] }))
       },
       removeCustomMenu: (name) => set((d) => ({ ...d, customMenus: d.customMenus.filter((m) => m !== name) })),
+
+      savePrices: (inputs) => {
+        if (inputs.length) set((d) => ({ ...d, priceList: upsertPrices(d.priceList, inputs, Date.now()) }))
+      },
+      removePrice: (key) => set((d) => ({ ...d, priceList: d.priceList.filter((e) => priceKey(e) !== key) })),
+      setSettings: (patch) =>
+        set((d) => {
+          const s = { ...d.settings, ...patch }
+          if (patch.buyerRule === 'balance') {
+            if (!s.balanceSince) s.balanceSince = todayStr()
+            if (s.defaultPriceMode === 'none') s.defaultPriceMode = 'detail'
+          }
+          return { ...d, settings: s }
+        }),
+      settleBalance: () =>
+        set((d) => ({ ...d, settings: { ...d.settings, balanceSince: nextSettlementDate(todayStr(), d.purchases) } })),
 
       importJson: (text) => {
         setData(parseAppData(JSON.parse(text))) // 실패(형식 오류·미래 버전)하면 throw → 호출측에서 안내

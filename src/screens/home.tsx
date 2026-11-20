@@ -6,6 +6,7 @@ import { Card, EmptyState, SectionTitle } from '@/components/common'
 import { CoffeeCup, EmptyCup, LogoMark } from '@/components/illustrations'
 import { InstallBanner } from '@/components/install'
 import { OrderCard } from '@/components/order-card'
+import { PricePurchaseSheet } from '@/components/price-sheet'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
@@ -21,7 +22,9 @@ import {
   nextBusinessDay,
   rankMembers,
 } from '@/logic/nextBuyer'
+import { needsPriceSheet, type PriceInput } from '@/logic/fairness'
 import { buildShareText } from '@/logic/shareText'
+import type { Pricing } from '@/types'
 import { useStore } from '@/store/store'
 
 // 히어로는 항상 에스프레소 배경이라 아바타 틴트는 밝은 크림 기준으로 계산
@@ -33,9 +36,10 @@ function relativeDays(from: string, to: string): string {
 }
 
 export function HomeScreen({ goSettings }: { goSettings: () => void }) {
-  const { data, today, memberById, savePurchase, removePurchase } = useStore()
+  const { data, today, memberById, savePurchase, removePurchase, savePrices } = useStore()
   const toast = useToast()
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [priceFor, setPriceFor] = useState<{ memberId: string; fromButton: boolean } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const pulse = useAnimationControls()
 
@@ -65,13 +69,25 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
   const last = buyer ? lastPurchaseDate(buyer.id, data.purchases, done ? today : target) : null
   const forecast = forecastBuyers(target, 5, data)
 
-  const buy = (memberId: string, fromButton = false) => {
+  /** 구매 기록 확정 (금액이 있으면 함께, 가격표 저장 항목도 함께) */
+  const record = (memberId: string, fromButton: boolean, pricing?: Pricing, entries: PriceInput[] = []) => {
     const m = memberById(memberId)
-    const undo = savePurchase({ date: today, memberId })
+    savePrices(entries)
+    const undo = savePurchase({ date: today, memberId, ...(pricing ? { pricing } : {}) })
     haptic([18, 40, 18])
     beanConfetti(fromButton ? btnRef.current : null)
     if (fromButton) pulse.start({ scale: [1, 0.9, 1.07, 1], transition: { duration: 0.45 } })
     toast({ message: `${m?.name ?? ''}님 기록했어요`, actionLabel: '되돌리기', onAction: undo })
+  }
+
+  /** [샀어요] / 구매자 선택. 금액 기록을 쓰는 설정이면 금액 시트를 먼저 연다 */
+  const askBuy = (memberId: string, fromButton = false) => {
+    if (todayPurchase) {
+      // 이미 기록된 날의 구매자 변경: 금액 기록은 그대로 두고 결제자만 바꾼다
+      const undo = savePurchase({ ...todayPurchase, memberId })
+      toast({ message: `${memberById(memberId)?.name ?? ''}님으로 바꿨어요`, actionLabel: '되돌리기', onAction: undo })
+    } else if (needsPriceSheet(data.settings)) setPriceFor({ memberId, fromButton })
+    else record(memberId, fromButton)
   }
 
   const share = async () => {
@@ -191,7 +207,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
                     <motion.button
                       ref={btnRef}
                       whileTap={{ scale: 0.95 }}
-                      onClick={() => buy(buyer.id, true)}
+                      onClick={() => askBuy(buyer.id, true)}
                       className="breathe flex min-h-16 w-full items-center justify-center gap-2.5 rounded-[22px] bg-caramel text-[19px] font-extrabold text-on-caramel"
                     >
                       <Check size={22} strokeWidth={3} /> 샀어요
@@ -264,10 +280,22 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           isAbsent={(id) => isAbsent(id, today, data.absences)}
           onChange={(id) => {
             setSheetOpen(false)
-            buy(id)
+            askBuy(id)
           }}
         />
       </Sheet>
+
+      <PricePurchaseSheet
+        open={!!priceFor}
+        memberId={priceFor?.memberId ?? null}
+        date={today}
+        onClose={() => setPriceFor(null)}
+        onConfirm={(id, pricing, entries) => {
+          const fromButton = priceFor?.fromButton ?? false
+          setPriceFor(null)
+          record(id, fromButton, pricing, entries)
+        }}
+      />
     </div>
   )
 }

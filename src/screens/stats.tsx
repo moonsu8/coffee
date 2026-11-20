@@ -1,10 +1,13 @@
 import { motion } from 'framer-motion'
+import { TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, PageHeader, SectionTitle, Segmented } from '@/components/common'
 import { EmptyCup } from '@/components/illustrations'
 import { memberStyle } from '@/lib/members'
-import { monthKey } from '@/logic/dates'
+import { signedWon } from '@/lib/format'
+import { formatMD, monthKey } from '@/logic/dates'
+import { balanceWindow, computeFairness, countUnpriced } from '@/logic/fairness'
 import { countPurchases } from '@/logic/nextBuyer'
 import { useStore } from '@/store/store'
 
@@ -106,7 +109,89 @@ export function StatsScreen() {
             </ul>
           )}
         </Card>
+
+        <BalanceCard range={range} month={month} />
       </div>
     </div>
+  )
+}
+
+const num = (n: number) => n.toLocaleString('ko-KR')
+
+/**
+ * 커피 수지: 낸 돈 / 마신 돈 / 차액. 멤버 순서대로 보여주고 순위·강조는 하지 않는다.
+ * 기간은 위의 이번 달/전체 토글을 따르며, 당번 계산용 balanceSince와는 별개다.
+ */
+function BalanceCard({ range, month }: { range: Range; month: string }) {
+  const { data, memberById } = useStore()
+  const { buyerRule, balanceSince } = data.settings
+  const fair = computeFairness(data.members, data.purchases, range === 'month' ? (d) => d.startsWith(month) : undefined)
+  // 당번 순서에 반영되지 않는 기록(차액 기준일 때만): balanceSince 이후의 금액 없는 기록
+  const unpriced = buyerRule === 'balance' ? countUnpriced(data.purchases, balanceWindow(data.settings)) : 0
+
+  return (
+    <Card>
+      <SectionTitle right={<span className="text-xs font-semibold text-ink-2">단위: 원</span>}>커피 수지</SectionTitle>
+
+      {unpriced > 0 && (
+        <p
+          role="alert"
+          className="mb-3 flex items-start gap-2 rounded-2xl bg-caramel/15 p-3 text-[13px] leading-snug font-semibold text-ink"
+        >
+          <TriangleAlert size={17} className="mt-px shrink-0 text-caramel-ink" />
+          <span>
+            금액이 없는 기록 {unpriced}건이 있어요. 차액 기준 당번 순서에 반영되지 않아요.
+          </span>
+        </p>
+      )}
+
+      {fair.counted === 0 ? (
+        <EmptyState
+          illustration={<EmptyCup />}
+          title="아직 금액 기록이 없어요"
+          body="[샀어요]에서 금액을 적으면 누가 얼마나 냈는지 여기에 정리돼요."
+        />
+      ) : (
+        <table className="w-full text-right text-[13px]">
+          <caption className="sr-only">멤버별 낸 돈, 마신 돈, 차액</caption>
+          <thead>
+            <tr className="text-xs text-ink-2">
+              <th scope="col" className="pb-2 text-left font-semibold">멤버</th>
+              <th scope="col" className="pb-2 font-semibold">낸 돈</th>
+              <th scope="col" className="pb-2 font-semibold">마신 돈</th>
+              <th scope="col" className="pb-2 font-semibold">차액</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {fair.rows.map((r) => {
+              const m = r.memberId ? memberById(r.memberId) : undefined
+              return (
+                <tr key={r.memberId ?? 'gone'} className="h-12">
+                  <th scope="row" className="py-1 text-left font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <Avatar member={m} size="xs" />
+                      <span className="max-w-[64px] truncate text-[14px]">{m?.name ?? '탈퇴한 멤버'}</span>
+                    </span>
+                  </th>
+                  <td className="py-1">{num(r.paid)}</td>
+                  <td className="py-1">{num(r.consumed)}</td>
+                  <td className="py-1 font-extrabold">{signedWon(r.balance).replace('원', '')}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+
+      <p className="mt-3 text-xs leading-relaxed text-ink-2">
+        차액 = 낸 돈 − 마신 돈. 플러스는 더 낸 것, 마이너스는 덜 낸 것이에요.
+        {fair.excluded > 0 && ` 금액 없는 기록 ${fair.excluded}건은 계산에서 제외했어요.`}
+      </p>
+      {buyerRule === 'balance' && (
+        <p className="mt-1 text-xs leading-relaxed text-ink-2">
+          당번 순서는 {balanceSince ? `${formatMD(balanceSince)}부터의` : '전체'} 기록으로 따로 계산해요.
+        </p>
+      )}
+    </Card>
   )
 }

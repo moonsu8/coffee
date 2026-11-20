@@ -100,6 +100,14 @@ function check(file: string): { rows: Row[]; extra: string[]; ok: boolean } {
   if (version < 2) {
     expect('새 필드 기본값 (orders 0건, customMenus 0건, 기본 메뉴 없음)', out.orders.length === 0 && out.customMenus.length === 0 && out.members.every((m) => !m.favorite))
   }
+  // 금액 기능 이전의 기록은 '금액 없음' 그대로여야 한다 (원본에 금액이 없었다면 변환 후에도 없어야 함)
+  const rawHasMoney = rawP.some((p) => p.pricing !== undefined) || (Array.isArray(json.priceList) && json.priceList.length > 0)
+  if (!rawHasMoney) {
+    expect(
+      '기존 구매 기록은 금액 없음 그대로 (금액 0건, 가격표 0건, 당번 기준 횟수)',
+      out.purchases.every((p) => !p.pricing) && out.priceList.length === 0 && out.settings.buyerRule === 'count',
+    )
+  }
   // 한 번 더 옮겨도 결과가 같은지 (저장 후 다시 열 때 값이 변하지 않는지)
   const again = migrate(JSON.parse(JSON.stringify(out)), 0)
   expect('다시 읽어도 동일 (멱등)', j(again) === j(out))

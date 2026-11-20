@@ -6,8 +6,13 @@ import {
   type Member,
   type Order,
   type OrderItem,
+  type PriceEntry,
+  type PriceMode,
+  type Pricing,
   type Purchase,
+  type Settings,
   type Size,
+  DEFAULT_BRAND,
 } from '../types'
 import { NO_DRINK } from '../logic/menu'
 import { uid } from './utils'
@@ -68,6 +73,56 @@ function readItem(raw: unknown): OrderItem | null {
   return o ? { ...o, memberId: raw.memberId, ...(skipped ? { skipped: true } : {}) } : null
 }
 
+const money = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
+const temp = (v: unknown) => (v === 'hot' ? ('hot' as const) : ('ice' as const))
+const sizeOf = (v: unknown): Size | undefined => (v === 'S' || v === 'M' || v === 'L' ? v : undefined)
+
+/** 구매 금액. 형식이 틀린 값은 '금액 없음'으로 취급한다 (기록 자체는 보존) */
+function readPricing(raw: unknown): Pricing | undefined {
+  if (!isObj(raw) || !money(raw.total) || raw.total <= 0) return undefined
+  if (raw.mode === 'detail' && Array.isArray(raw.lines)) {
+    const lines = raw.lines.flatMap((l) => {
+      if (!isObj(l) || typeof l.memberId !== 'string' || !str(l.menu) || !money(l.price)) return []
+      const size = sizeOf(l.size)
+      return [{ memberId: l.memberId, menu: str(l.menu)!, temp: temp(l.temp), ...(size ? { size } : {}), price: l.price }]
+    })
+    return lines.length ? { mode: 'detail', total: raw.total, lines } : undefined
+  }
+  if (raw.mode === 'simple' && Array.isArray(raw.participants)) {
+    const participants = [...new Set(raw.participants.filter((x): x is string => typeof x === 'string'))]
+    return participants.length ? { mode: 'simple', total: raw.total, participants } : undefined
+  }
+  return undefined
+}
+
+function readPriceList(v: unknown): PriceEntry[] {
+  if (!Array.isArray(v)) return []
+  const map = new Map<string, PriceEntry>()
+  for (const raw of v) {
+    if (!isObj(raw) || !str(raw.menu) || !money(raw.price)) continue
+    const e: PriceEntry = {
+      cafeBrandId: str(raw.cafeBrandId) ?? DEFAULT_BRAND,
+      menu: str(raw.menu)!,
+      temp: temp(raw.temp),
+      size: typeof raw.size === 'string' ? raw.size : '',
+      price: raw.price,
+      updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
+    }
+    map.set([e.cafeBrandId, e.menu, e.temp, e.size].join('|'), e)
+  }
+  return [...map.values()]
+}
+
+function readSettings(v: unknown): Settings {
+  const s = isObj(v) ? v : {}
+  const modes: PriceMode[] = ['none', 'detail', 'simple']
+  return {
+    buyerRule: s.buyerRule === 'balance' ? 'balance' : 'count',
+    defaultPriceMode: modes.includes(s.defaultPriceMode as PriceMode) ? (s.defaultPriceMode as PriceMode) : 'none',
+    ...(isDate(s.balanceSince) ? { balanceSince: s.balanceSince } : {}),
+  }
+}
+
 function normalizeLatest(d: Raw): AppData {
   if (!Array.isArray(d.members)) throw new Error('올바른 커피 당번 데이터가 아니에요')
 
@@ -95,7 +150,13 @@ function normalizeLatest(d: Raw): AppData {
       if (!isObj(raw) || !isDate(raw.date) || typeof raw.memberId !== 'string') continue
       // 탈퇴한 멤버의 과거 기록도 보존한다 (화면에서는 '탈퇴한 멤버')
       const memo = str(raw.memo)
-      byDate.set(raw.date, { date: raw.date, memberId: raw.memberId, ...(memo ? { memo } : {}) })
+      const pricing = readPricing(raw.pricing)
+      byDate.set(raw.date, {
+        date: raw.date,
+        memberId: raw.memberId,
+        ...(memo ? { memo } : {}),
+        ...(pricing ? { pricing } : {}), // 없으면 '금액 없음' (기존 기록은 그대로)
+      })
     }
   }
 
@@ -134,6 +195,8 @@ function normalizeLatest(d: Raw): AppData {
     skipDays: Array.isArray(d.skipDays) ? [...new Set(d.skipDays.filter(isDate))].sort() : [],
     orders,
     customMenus,
+    priceList: readPriceList(d.priceList),
+    settings: readSettings(d.settings),
     updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0,
   }
 }

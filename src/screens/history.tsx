@@ -5,6 +5,7 @@ import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, MemberPicker, PageHeader, Segmented } from '@/components/common'
 import { EmptyCup } from '@/components/illustrations'
 import { MonthGrid, MonthNav } from '@/components/month-grid'
+import { PricingFields } from '@/components/pricing-fields'
 import { OrderHistory } from '@/components/order-card'
 import { SwipeRow } from '@/components/swipe-row'
 import { useToast } from '@/components/toast'
@@ -12,9 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
 import { memberStyle } from '@/lib/members'
 import { formatShort, monthKey, weekdayKo } from '@/logic/dates'
-import { isBusinessDay } from '@/logic/nextBuyer'
+import { diffPrices, warnsOnClear } from '@/logic/fairness'
+import { isAbsent, isBusinessDay } from '@/logic/nextBuyer'
+import { buildPricing, initPricingForm, priceInputsOf, type LineBase } from '@/logic/pricing-form'
 import { useStore } from '@/store/store'
-import type { DateStr } from '@/types'
+import type { DateStr, Pricing } from '@/types'
 
 type View = 'calendar' | 'list'
 
@@ -172,12 +175,58 @@ function EditorBody({
   remove: ReturnType<typeof useStore>['removePurchase']
   toast: ReturnType<typeof useToast>
 }) {
-  const { data, today } = useStore()
+  const { data, today, savePrices } = useStore()
   const existing = data.purchases.find((p) => p.date === initialDate)
   const [date, setDate] = useState(initialDate)
   const [memberId, setMemberId] = useState<string | null>(existing?.memberId ?? null)
   const [memo, setMemo] = useState(existing?.memo ?? '')
   const clash = date !== initialDate && data.purchases.some((p) => p.date === date)
+  const [warnClear, setWarnClear] = useState(false)
+
+  // 금액 입력 대상: 기존 상세 기록이면 저장된 줄, 아니면 그날 주문 스냅샷. 날짜를 바꾸면 폼을 다시 만든다
+  const pricingSetup = (d: DateStr) => {
+    const keep = d === initialDate ? existing?.pricing : undefined
+    const day = data.orders.find((o) => o.date === d)
+    const lines: LineBase[] =
+      keep?.mode === 'detail'
+        ? keep.lines!.map((l) => ({ memberId: l.memberId, order: { menu: l.menu, temp: l.temp, ...(l.size ? { size: l.size } : {}) } }))
+        : (day?.items ?? []).filter((i) => !i.skipped && i.menu !== '안 마심').map((i) => ({ memberId: i.memberId, order: i }))
+    const participantsDefault = lines.length
+      ? lines.map((l) => l.memberId)
+      : data.members.filter((m) => !isAbsent(m.id, d, data.absences)).map((m) => m.id)
+    const form = initPricingForm({
+      settings: data.settings,
+      lines,
+      participantsDefault,
+      priceList: data.priceList,
+      existing: keep,
+      // 금액 없이 저장돼 있던 지난 기록은 '금액 없음'에서 시작 (기존 기록은 그대로 유지)
+      startMode: d === initialDate && existing && !existing.pricing ? 'none' : undefined,
+    })
+    return { lines, form }
+  }
+  const [setup, setSetup] = useState(() => ({ date: initialDate, ...pricingSetup(initialDate) }))
+  if (setup.date !== date) setSetup({ date, ...pricingSetup(date) })
+  const { lines, form } = setup
+  const built = buildPricing(form, lines)
+  const pricing: Pricing | undefined = form.mode === 'none' ? undefined : built.pricing
+
+  const doSave = () => {
+    if (!memberId) return
+    if (form.mode === 'detail' && form.saveToList) savePrices(diffPrices(data.priceList, priceInputsOf(form, lines)))
+    // 날짜를 옮긴 수정이면 원래 날짜의 기록은 지운다
+    const undoOld = existing && date !== initialDate ? remove(initialDate) : undefined
+    const undo = save({ date, memberId, memo, ...(pricing ? { pricing } : {}) })
+    onClose()
+    toast({
+      message: `${formatShort(date)} 기록을 저장했어요`,
+      actionLabel: '되돌리기',
+      onAction: () => {
+        undo()
+        undoOld?.()
+      },
+    })
+  }
 
   return (
     <div className="space-y-5 pb-2">
@@ -212,6 +261,16 @@ function EditorBody({
           className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
         />
       </div>
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink-2">금액 (선택)</p>
+        <PricingFields
+          form={form}
+          onChange={(f) => setSetup({ ...setup, form: f })}
+          lines={lines}
+          idPrefix="edit"
+          allowNone
+        />
+      </div>
       <div className="flex gap-2 pt-1">
         {existing && (
           <Button
@@ -229,26 +288,46 @@ function EditorBody({
         <Button
           size="lg"
           className="flex-1"
-          disabled={!memberId}
+          disabled={!memberId || !built.ok}
           onClick={() => {
-            if (!memberId) return
-            // 날짜를 옮긴 수정이면 원래 날짜의 기록은 지운다
-            const undoOld = existing && date !== initialDate ? remove(initialDate) : undefined
-            const undo = save({ date, memberId, memo })
-            onClose()
-            toast({
-              message: `${formatShort(date)} 기록을 저장했어요`,
-              actionLabel: '되돌리기',
-              onAction: () => {
-                undo()
-                undoOld?.()
-              },
-            })
+            // 차액 기준에서 금액을 지우면 당번 순서가 달라질 수 있어 먼저 확인
+            if (
+              warnsOnClear({
+                rule: data.settings.buyerRule,
+                since: data.settings.balanceSince,
+                date: initialDate,
+                before: existing?.pricing,
+                after: pricing,
+              })
+            ) {
+              setWarnClear(true)
+              return
+            }
+            doSave()
           }}
         >
           저장
         </Button>
       </div>
+
+      <Sheet open={warnClear} onOpenChange={setWarnClear} title="금액을 지울까요?" description="차액 계산에서 빠져 당번 순서가 달라질 수 있어요">
+        <div className="flex gap-2 pt-2">
+          <Button variant="soft" size="lg" className="flex-1" onClick={() => setWarnClear(false)}>
+            취소
+          </Button>
+          <Button
+            variant="danger"
+            size="lg"
+            className="flex-1"
+            onClick={() => {
+              setWarnClear(false)
+              doSave()
+            }}
+          >
+            그래도 지우기
+          </Button>
+        </div>
+      </Sheet>
     </div>
   )
 }
