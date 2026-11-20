@@ -295,10 +295,13 @@ function RecoverySheet({
           되돌리면 지금 상태는 백업으로 남겨 둬요. 그대로 두면 지금 상태를 새 형식으로 옮기고, 정상 상태였던 데이터는 따로 보관해요.
         </p>
         {failed && <p className="text-[13px] font-semibold text-danger">저장 공간이 부족해서 보관하지 못했어요. 다시 시도하거나 공간을 확보해 주세요.</p>}
-        <div className="flex gap-2">
-          <Button variant="soft" size="lg" className="flex-1" onClick={() => onChoose('keep')}>
-            그대로 두기
-          </Button>
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <Button variant="soft" size="lg" className="w-full" onClick={() => onChoose('keep')}>
+              그대로 두기
+            </Button>
+            <p className="mt-1.5 text-center text-xs text-ink-2">이 선택은 되돌릴 수 없어요</p>
+          </div>
           <Button size="lg" className="flex-1" onClick={() => onChoose('restore')}>
             되돌리기
           </Button>

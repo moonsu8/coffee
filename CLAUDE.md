@@ -68,7 +68,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 안전장치: 구버전을 처음 옮길 때 원본을 `coffee-duty:backup-before-v2`에 한 번 보관, 읽을 수 없는 저장값은 초기 데이터로 덮어쓰기 전에 `coffee-duty:corrupt-backup`에 보관. 저장 키 `coffee-duty:v1`은 그대로 쓴다.
 - **shadow(마지막 정상 상태)**: 저장할 때마다 메인(`coffee-duty:v1`)과 함께 전체 데이터를 `coffee-duty:shadow`에도 쓴다(`updatedAt` 포함). 이미 배포된 옛 버전 앱(`42cb18e`)은 `schemaVersion`을 검사하지 않고 **열기만 해도** 아는 필드만 남겨 다시 저장해 `orders`·`priceList`·`pricing`·`favorite`·`settings`를 지우므로, 그 경우를 감지하기 위한 장치다. 옛 앱은 shadow 키를 모른다.
   - 로드 시 메인이 v1 모양(schemaVersion 없음)인데 v2 shadow가 있고 더 최신이면(또는 메인이 읽을 수 없는데 정상 shadow가 있으면) **자동 복구/병합하지 않고** 바텀시트로 묻는다. 묻는 동안에는 저장하지 않는다(shadow가 덮어써지지 않도록).
-  - "되돌리기": 지금 메인을 `coffee-duty:backup-before-restore`에 남기고 shadow 전체를 복원. "그대로 두기": 메인을 정상 마이그레이션하고 이전 shadow는 `coffee-duty:shadow-prev`에 보관. 보관에 실패하면 선택을 확정하지 않는다.
+  - "되돌리기": 지금 메인을 `coffee-duty:backup-before-restore`에 남기고 shadow 전체를 복원. "그대로 두기": 메인을 정상 마이그레이션하고 이전 shadow는 `coffee-duty:shadow-prev`에 보관. 보관에 실패하면 선택을 확정하지 않는다. `shadow-prev`는 앱 화면에서 복구하는 메뉴를 **의도적으로 두지 않았다**(복구 시트의 "그대로 두기" 아래에 "이 선택은 되돌릴 수 없어요" 안내만 있다). 초기화·가져오기는 섀도를 새 상태로 바꾸는 지금 동작 그대로다.
   - shadow가 없거나 깨졌거나 v2가 아니면(미래 버전 포함) 조용히 무시한다. 설정 > 데이터의 "마지막 정상 상태로 되돌리기"는 같은 복원을 수동으로 한다. 로직은 `lib/data.ts`(`readShadow`/`isOverwrittenByOldApp`/`applyRecovery`/`restoreLastGood`), 테스트는 `lib/shadow.test.ts`.
 - **실제 데이터 검증**: 총무 폰에서 내보낸 JSON을 `backup/`에 넣고 `npm run check:migration`. 개수·값 일치 여부만 출력(실명 미출력), 원본은 읽기만 한다. `backup/`은 `.gitignore`에 있고 **절대 커밋하지 않는다**(실명 포함). 배포 전에 이 검증을 통과시킨다.
 
