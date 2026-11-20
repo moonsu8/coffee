@@ -1,13 +1,16 @@
 import { Reorder, useDragControls } from 'framer-motion'
-import { Download, GripVertical, Plus, RotateCcw, Smartphone, Trash2, Upload } from 'lucide-react'
+import { Download, GripVertical, Plus, RotateCcw, Smartphone, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, PageHeader, SectionTitle } from '@/components/common'
 import { InstallSheet } from '@/components/install'
+import { fieldsFromOrder, OrderFields, orderFromFields } from '@/components/order-fields'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
 import { downloadJson } from '@/lib/data'
+import { readMetrics } from '@/lib/metrics'
+import { PRESET_MENUS } from '@/logic/menu'
 import { MEMBER_COLORS, MEMBER_EMOJIS, memberStyle, suggestStyle } from '@/lib/members'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/store'
@@ -16,7 +19,8 @@ import type { Member } from '@/types'
 type Editing = { mode: 'add' } | { mode: 'edit'; member: Member } | null
 
 export function SettingsScreen() {
-  const { data, today, reorderMembers, removeMember, importJson, resetToInitial } = useStore()
+  const { data, today, reorderMembers, removeMember, importJson, resetToInitial, addCustomMenu, removeCustomMenu } = useStore()
+  const [menuInput, setMenuInput] = useState('')
   const toast = useToast()
   const [editing, setEditing] = useState<Editing>(null)
   const [deleting, setDeleting] = useState<Member | null>(null)
@@ -74,6 +78,46 @@ export function SettingsScreen() {
         </Card>
 
         <Card>
+          <SectionTitle>메뉴 목록</SectionTitle>
+          <p className="mb-3 text-[13px] text-ink-2">기본 메뉴 외에 우리 팀만 쓰는 메뉴를 추가할 수 있어요.</p>
+          <ul className="flex flex-wrap gap-2">
+            {PRESET_MENUS.map((p) => (
+              <li key={p.name} className="rounded-full bg-surface-2 px-3.5 py-2 text-sm font-semibold text-ink-2">
+                {p.name}
+              </li>
+            ))}
+            {data.customMenus.map((m) => (
+              <li key={m} className="flex items-center rounded-full bg-caramel/20 pl-3.5 text-sm font-semibold">
+                {m}
+                <button aria-label={`${m} 메뉴 삭제`} onClick={() => removeCustomMenu(m)} className="grid size-11 place-items-center rounded-full">
+                  <X size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <form
+            className="mt-3 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              addCustomMenu(menuInput)
+              setMenuInput('')
+            }}
+          >
+            <input
+              aria-label="추가할 메뉴 이름"
+              value={menuInput}
+              maxLength={14}
+              onChange={(e) => setMenuInput(e.target.value)}
+              placeholder="예) 유자차"
+              className="min-h-12 min-w-0 flex-1 rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
+            />
+            <Button variant="dark" type="submit" disabled={!menuInput.trim()}>
+              추가
+            </Button>
+          </form>
+        </Card>
+
+        <Card>
           <SectionTitle>앱</SectionTitle>
           <Button variant="soft" className="w-full justify-start" onClick={() => setInstallOpen(true)}>
             <Smartphone size={18} /> 앱 설치 방법
@@ -98,6 +142,7 @@ export function SettingsScreen() {
             <RotateCcw size={17} /> 초기 데이터로 되돌리기
           </Button>
         </Card>
+        <UsageStats />
         <p className="pb-2 text-center text-xs text-ink-2">커피 당번 · 서버 없이 이 브라우저에서만 동작해요</p>
       </div>
 
@@ -214,6 +259,7 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
   const suggested = suggestStyle(data.members)
   const init = base ? memberStyle(base) : suggested
   const [name, setName] = useState(base?.name ?? '')
+  const [fav, setFav] = useState(() => fieldsFromOrder(base?.favorite))
   const [color, setColor] = useState(init.color)
   const [emoji, setEmoji] = useState(init.emoji)
   const preview = { id: base?.id ?? 'new', color, emoji }
@@ -272,18 +318,48 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
           ))}
         </div>
       </div>
+      <div className="border-t border-line pt-5">
+        <p className="mb-3 text-[15px] font-bold">기본 메뉴</p>
+        <OrderFields value={fav} onChange={setFav} customMenus={data.customMenus} allowNone idPrefix="fav" />
+      </div>
       <Button
         size="lg"
         className="w-full"
         disabled={!valid}
         onClick={() => {
-          if (base) updateMember(base.id, { name, color, emoji })
-          else addMember({ name, color, emoji })
+          const favorite = orderFromFields(fav)
+          if (base) updateMember(base.id, { name, color, emoji, favorite: favorite ?? null })
+          else addMember({ name, color, emoji, ...(favorite ? { favorite } : {}) })
           onClose()
         }}
       >
         {base ? '저장' : '추가하기'}
       </Button>
     </div>
+  )
+}
+
+/** 이 기기에서만 집계한 사용 지표 (외부로 전송하지 않음) */
+function UsageStats() {
+  const m = readMetrics()
+  const last = m.usedDates[m.usedDates.length - 1]
+  const rows: [string, string][] = [
+    ['주문표 복사', `${m.copyCount}회`],
+    ['주문표를 쓴 날', `${m.usedDates.length}일${last ? ` (최근 ${last.slice(5).replace('-', '/')})` : ''}`],
+    ['당일 메뉴 변경', `${m.editCount}회`],
+  ]
+  return (
+    <Card>
+      <SectionTitle>사용 통계 (이 기기)</SectionTitle>
+      <dl className="divide-y divide-line">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex min-h-11 items-center justify-between">
+            <dt className="text-[15px] text-ink-2">{k}</dt>
+            <dd className="text-[15px] font-bold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-2">이 기기에만 저장되고 어디로도 전송되지 않아요.</p>
+    </Card>
   )
 }

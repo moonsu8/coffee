@@ -2,3 +2,6 @@ node_modules
 dist
 *.local
 .claude
+
+# 실명이 들어간 실제 데이터 백업. 절대 커밋하지 않는다
+backup/

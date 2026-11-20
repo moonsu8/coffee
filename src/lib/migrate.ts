@@ -1,0 +1,158 @@
+import {
+  SCHEMA_VERSION,
+  type AppData,
+  type Absence,
+  type DayOrder,
+  type Member,
+  type Order,
+  type OrderItem,
+  type Purchase,
+  type Size,
+} from '../types'
+import { NO_DRINK } from '../logic/menu'
+import { uid } from './utils'
+
+/** 앱보다 새로운 버전의 데이터. 읽으면 안 된다(덮어써서 잃을 수 있음) */
+export class FutureVersionError extends Error {
+  constructor(public version: number) {
+    super('이 데이터는 더 새로운 버전의 앱에서 만들어졌어요. 앱을 최신으로 업데이트해 주세요.')
+  }
+}
+
+type Raw = Record<string, unknown>
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const isDate = (v: unknown): v is string => typeof v === 'string' && DATE_RE.test(v)
+const isObj = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v)
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+
+/* ───────── 버전 단계 (각 단계는 한 칸씩만 올린다) ───────── */
+
+/** v1 → v2: 주문 기능 추가. 기존 필드는 건드리지 않고 새 필드만 채운다 */
+function v1ToV2(d: Raw, now: number): Raw {
+  return {
+    ...d,
+    schemaVersion: 2,
+    orders: Array.isArray(d.orders) ? d.orders : [],
+    customMenus: Array.isArray(d.customMenus) ? d.customMenus : [],
+    updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : now,
+  }
+}
+
+const STEPS: Record<number, (d: Raw, now: number) => Raw> = { 1: v1ToV2 }
+
+export function versionOf(input: unknown): number {
+  return isObj(input) && typeof input.schemaVersion === 'number' ? input.schemaVersion : 1
+}
+
+/* ───────── 최신 구조 검증·정규화 ───────── */
+
+function readOrder(raw: Raw): Order | undefined {
+  const menu = str(raw.menu)
+  if (!menu) return undefined
+  const size = raw.size === 'S' || raw.size === 'M' || raw.size === 'L' ? (raw.size as Size) : undefined
+  const shot = typeof raw.shot === 'number' && Number.isFinite(raw.shot) && raw.shot > 0 ? raw.shot : undefined
+  const memo = str(raw.memo)
+  return {
+    menu,
+    temp: raw.temp === 'hot' ? 'hot' : 'ice',
+    ...(size ? { size } : {}),
+    ...(shot ? { shot } : {}),
+    ...(memo ? { memo } : {}),
+  }
+}
+
+function readItem(raw: unknown): OrderItem | null {
+  if (!isObj(raw) || typeof raw.memberId !== 'string') return null
+  const skipped = raw.skipped === true
+  const o = readOrder(raw) ?? (skipped ? { menu: NO_DRINK, temp: 'ice' as const } : undefined)
+  return o ? { ...o, memberId: raw.memberId, ...(skipped ? { skipped: true } : {}) } : null
+}
+
+function normalizeLatest(d: Raw): AppData {
+  if (!Array.isArray(d.members)) throw new Error('올바른 커피 당번 데이터가 아니에요')
+
+  const members: Member[] = []
+  const seen = new Set<string>()
+  d.members.forEach((raw, i) => {
+    if (!isObj(raw) || !str(raw.name)) return
+    const id = typeof raw.id === 'string' && raw.id && !seen.has(raw.id) ? raw.id : uid()
+    seen.add(id)
+    const fav = isObj(raw.favorite) ? readOrder(raw.favorite) : undefined
+    members.push({
+      id,
+      name: str(raw.name)!,
+      order: typeof raw.order === 'number' ? raw.order : i + 1, // 값은 그대로 보존 (재번호 매기지 않음)
+      color: typeof raw.color === 'string' ? raw.color : undefined,
+      emoji: typeof raw.emoji === 'string' ? raw.emoji : undefined,
+      ...(fav ? { favorite: fav } : {}),
+    })
+  })
+  members.sort((a, b) => a.order - b.order)
+
+  const byDate = new Map<string, Purchase>()
+  if (Array.isArray(d.purchases)) {
+    for (const raw of d.purchases) {
+      if (!isObj(raw) || !isDate(raw.date) || typeof raw.memberId !== 'string') continue
+      // 탈퇴한 멤버의 과거 기록도 보존한다 (화면에서는 '탈퇴한 멤버')
+      const memo = str(raw.memo)
+      byDate.set(raw.date, { date: raw.date, memberId: raw.memberId, ...(memo ? { memo } : {}) })
+    }
+  }
+
+  const absences: Absence[] = []
+  if (Array.isArray(d.absences)) {
+    for (const raw of d.absences) {
+      if (!isObj(raw) || !isDate(raw.from) || !isDate(raw.to) || typeof raw.memberId !== 'string') continue
+      absences.push({ id: str(raw.id) ?? uid(), memberId: raw.memberId, from: raw.from, to: raw.to })
+    }
+  }
+
+  const orders: DayOrder[] = []
+  if (Array.isArray(d.orders)) {
+    const seenDates = new Set<string>()
+    for (const raw of d.orders) {
+      if (!isObj(raw) || !isDate(raw.date) || !Array.isArray(raw.items) || seenDates.has(raw.date)) continue
+      seenDates.add(raw.date)
+      orders.push({
+        date: raw.date,
+        items: raw.items.map(readItem).filter((i): i is OrderItem => i !== null),
+        updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
+      })
+    }
+    orders.sort((a, b) => (a.date < b.date ? -1 : 1))
+  }
+
+  const customMenus = Array.isArray(d.customMenus)
+    ? [...new Set(d.customMenus.map(str).filter((m): m is string => !!m))]
+    : []
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    members,
+    purchases: [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
+    absences,
+    skipDays: Array.isArray(d.skipDays) ? [...new Set(d.skipDays.filter(isDate))].sort() : [],
+    orders,
+    customMenus,
+    updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0,
+  }
+}
+
+/**
+ * 어떤 버전의 데이터든(localStorage·내보낸 JSON·data.json) 최신 구조로 바꾼다.
+ * - 구버전: 단계별로 올리며 기존 값은 보존
+ * - 미래 버전: FutureVersionError (읽지 않는다)
+ * - 형식이 아예 틀리면 Error
+ */
+export function migrate(input: unknown, now: number = Date.now()): AppData {
+  if (!isObj(input) || !Array.isArray(input.members)) throw new Error('올바른 커피 당번 데이터가 아니에요')
+  let v = versionOf(input)
+  if (!Number.isInteger(v) || v < 1) v = 1
+  if (v > SCHEMA_VERSION) throw new FutureVersionError(v)
+  let cur: Raw = input
+  while (v < SCHEMA_VERSION) {
+    cur = STEPS[v](cur, now)
+    v++
+  }
+  return normalizeLatest(cur)
+}

@@ -5,6 +5,7 @@ import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, MemberPicker, PageHeader, Segmented } from '@/components/common'
 import { EmptyCup } from '@/components/illustrations'
 import { MonthGrid, MonthNav } from '@/components/month-grid'
+import { OrderHistory } from '@/components/order-card'
 import { SwipeRow } from '@/components/swipe-row'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
@@ -109,8 +110,9 @@ export function HistoryScreen() {
                   <ul className="space-y-2.5">
                     {monthPurchases.map((p) => {
                       const m = memberById(p.memberId)
+                      const day = data.orders.find((o) => o.date === p.date)
                       return (
-                        <li key={p.date} className="rounded-[20px] shadow-card">
+                        <li key={p.date} className="overflow-hidden rounded-[20px] bg-surface shadow-card">
                           <SwipeRow label={`${formatShort(p.date)} ${m?.name ?? ''}`} onEdit={() => setEditing(p.date)} onDelete={() => del(p.date)}>
                             <div className="flex min-h-[68px] items-center gap-3.5 px-4 py-3">
                               <Avatar member={m} size="md" />
@@ -124,6 +126,7 @@ export function HistoryScreen() {
                               </div>
                             </div>
                           </SwipeRow>
+                          {day && <OrderHistory day={day} />}
                         </li>
                       )
                     })}

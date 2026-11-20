@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 2,
   "members": [
     { "id": "m1", "name": "멤버 1", "order": 1, "color": "#C8553D", "emoji": "☕" },
     { "id": "m2", "name": "멤버 2", "order": 2, "color": "#D9A93B", "emoji": "🥐" },
@@ -9,5 +10,8 @@
   ],
   "purchases": [],
   "absences": [],
-  "skipDays": []
+  "skipDays": [],
+  "orders": [],
+  "customMenus": [],
+  "updatedAt": 0
 }

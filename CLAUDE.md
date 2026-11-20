@@ -40,9 +40,28 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - standalone(설치된 앱)으로 실행 중이면 배너를 띄우지 않는다. 안드로이드 카카오톡은 `kakaotalk://web/openExternal?url=` 로 외부 브라우저를 연다.
 - 테스트: `src/lib/install.test.ts` (UA 판별, 7일 경계). 실제 기기에서의 설치 흐름은 자동 테스트하지 못했다.
 
+## 오늘의 주문 (메뉴 취합)
+- 당번(총무) 폰 한 대에서 멤버 주문을 모아 단톡방에 공유하는 구조. 서버 없음, 기기별 localStorage.
+- 데이터: `Member.favorite`(기본 메뉴), `AppData.orders`(그날 `items` = 기본 메뉴보다 우선하는 값), `customMenus`(프리셋 외 사용자 메뉴). `schemaVersion`(현재 2)과 `updatedAt`(모든 변경 시 갱신)이 최상위에 있다.
+- 프리셋 메뉴는 코드 상수(`logic/menu.ts`)이고 데이터에는 저장하지 않는다. "안 마심"은 메뉴 이름 `'안 마심'` 또는 `skipped: true` 둘 다 인정(`isNoDrink`).
+- `logic/order.ts` (순수 함수): `buildDraft`(휴가자 제외, favorite으로 초안, 없으면 미정) → `resolveOrder`(당일 저장값을 덮어씀, 휴가자의 저장값은 무시) → `aggregate`(메뉴+온도+사이즈+샷으로 묶음, **메모는 키에서 제외**, 안 마심·미정 제외) → `buildOrderText`(공유 텍스트). 집계 줄은 "아이스 아메리카노 3", 개인별 줄은 "아아 / 라떼(따뜻)"처럼 줄임말.
+- **주문표 복사 시점에 그날 최종 주문을 `orders`에 굳힌다(`snapshotItems`).** 이후 기본 메뉴를 바꿔도 지난 기록 화면의 주문 내역은 변하지 않는다. `edited`("오늘만" 표시)는 기본 메뉴와 내용이 다를 때만 true(`sameLine`).
+- UI: `components/order-card.tsx`(홈 카드, 멤버별 바텀시트, 복사 실패 시 텍스트 대체 시트, 기록 화면의 접이식 `OrderHistory`), `components/order-fields.tsx`(오늘 변경/기본 메뉴 지정 공용 폼). 새 색상은 추가하지 않았다.
+- 사용 지표(`lib/metrics.ts`): 키 `coffee-duty:metrics`에 복사 횟수·사용한 날짜·당일 변경 횟수. 앱 데이터와 분리(내보내기/가져오기/초기화에 섞이지 않음), 외부 전송 없음. 설정 맨 아래 "사용 통계(이 기기)".
+
+## 데이터 마이그레이션 (중요: 기존 기록을 잃지 않는 것이 최우선)
+- `lib/migrate.ts`의 `migrate()`가 localStorage·JSON 가져오기·`data.json` 모두의 단일 진입점(`parseAppData`). 단계(`STEPS`)를 한 칸씩 올린다. **구조를 바꾸면 `SCHEMA_VERSION`을 올리고 단계 함수와 테스트를 추가한다.**
+- v1 → v2: 기존 필드는 값 그대로 보존하고 새 필드만 채운다. 멤버 `order` 값은 재번호하지 않고, 탈퇴한 멤버의 구매·휴가 기록도 버리지 않으며, 휴가 from/to도 뒤집지 않는다.
+- 앱보다 새로운 `schemaVersion`은 `FutureVersionError`로 읽지 않는다. localStorage가 미래 버전이면 앱이 "업데이트해 주세요" 화면만 띄우고 **저장을 막는다**(구버전 앱이 덮어써 잃는 것 방지).
+- 안전장치: 구버전을 처음 옮길 때 원본을 `coffee-duty:backup-before-v2`에 한 번 보관, 읽을 수 없는 저장값은 초기 데이터로 덮어쓰기 전에 `coffee-duty:corrupt-backup`에 보관. 저장 키 `coffee-duty:v1`은 그대로 쓴다.
+- **실제 데이터 검증**: 총무 폰에서 내보낸 JSON을 `backup/`에 넣고 `npm run check:migration`. 개수·값 일치 여부만 출력(실명 미출력), 원본은 읽기만 한다. `backup/`은 `.gitignore`에 있고 **절대 커밋하지 않는다**(실명 포함). 배포 전에 이 검증을 통과시킨다.
+
+## 개발 규칙
+- 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
+
 ## 상태
-- 로직 테스트 27/27 통과, `tsc` 및 `vite build` 통과 (PWA SW/manifest 생성 확인).
-- **미확인**: 브라우저에서의 실제 렌더링/제스처(스와이프, 드래그 정렬, 컨페티, 바텀시트)와 모바일 375px 레이아웃은 아직 눈으로 확인하지 못했다.
+- 테스트 71개 통과(`nextBuyer` 27, `order`, `migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- **미확인**: 주문 카드·바텀시트·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)
 - 주소: `https://<아이디>.github.io/coffee/` (저장소 이름이 `coffee`일 때). 저장소는 public.

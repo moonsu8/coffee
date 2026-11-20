@@ -5,6 +5,7 @@ import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, SectionTitle } from '@/components/common'
 import { CoffeeCup, EmptyCup, LogoMark } from '@/components/illustrations'
 import { InstallBanner } from '@/components/install'
+import { OrderCard } from '@/components/order-card'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
@@ -208,6 +209,8 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           )}
         </div>
       </motion.section>
+
+      {isToday && <OrderCard date={today} />}
 
       {/* ───── 앞으로 5영업일 ───── */}
       <Card className="mt-5">

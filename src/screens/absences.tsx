@@ -118,7 +118,7 @@ export function AbsencesScreen() {
                     <div className="flex items-center gap-3 rounded-[20px] bg-surface p-3 pl-4 shadow-card">
                       <Avatar member={m} size="md" absent={ongoing} />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[17px] font-bold">{m?.name}</p>
+                        <p className="text-[17px] font-bold">{m?.name ?? '탈퇴한 멤버'}</p>
                         <p className="text-sm text-ink-2">
                           {formatMD(a.from)}
                           {a.to !== a.from && ` ~ ${formatMD(a.to)}`} · {diffDays(a.to, a.from) + 1}일
@@ -157,7 +157,7 @@ export function AbsencesScreen() {
                     <li key={a.id} className="flex min-h-14 items-center gap-3 py-1.5">
                       <Avatar member={memberById(a.memberId)} size="sm" />
                       <span className="flex-1 text-[15px]">
-                        <b>{memberById(a.memberId)?.name}</b>{' '}
+                        <b>{memberById(a.memberId)?.name ?? '탈퇴한 멤버'}</b>{' '}
                         <span className="text-ink-2">
                           {formatMD(a.from)}
                           {a.to !== a.from && ` ~ ${formatMD(a.to)}`}
