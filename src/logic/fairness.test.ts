@@ -4,6 +4,7 @@ import type { Member, PriceEntry, Pricing, Purchase } from '../types'
 import {
   allocate,
   allowedModes,
+  applySettingsPatch,
   balanceWindow,
   computeFairness,
   countUnpriced,
@@ -12,6 +13,7 @@ import {
   lookupPrice,
   needsPriceSheet,
   nextSettlementDate,
+  reenablePlan,
   upsertPrices,
   warnsOnClear,
 } from './fairness'
@@ -303,5 +305,63 @@ describe('금액 표시', () => {
     expect(signedWon(3200)).toBe('+3,200원')
     expect(signedWon(-1500)).toBe('−1,500원')
     expect(signedWon(0)).toBe('0원')
+  })
+})
+
+describe('차액 기준을 다시 켤 때 (reenablePlan)', () => {
+  const settings = (since?: string) => ({ buyerRule: 'count' as const, defaultPriceMode: 'none' as const, ...(since ? { balanceSince: since } : {}) })
+  const priced = (d: string) => buy(d, 'a', simple(3000, ['a']))
+
+  it('처음 켜는 경우(balanceSince 없음)는 확인하지 않는다', () => {
+    expect(reenablePlan(settings(), [buy('2026-11-02', 'a')], '2026-11-10')).toBeNull()
+  })
+
+  it('balanceSince 이후 금액 없는 기록이 없으면 확인하지 않는다', () => {
+    expect(reenablePlan(settings('2026-11-01'), [priced('2026-11-02'), priced('2026-11-03')], '2026-11-10')).toBeNull()
+  })
+
+  it('balanceSince 이전의 금액 없는 기록은 세지 않는다', () => {
+    expect(reenablePlan(settings('2026-11-05'), [buy('2026-11-02', 'a'), priced('2026-11-06')], '2026-11-10')).toBeNull()
+  })
+
+  it('금액 없는 기록 N건을 세고, 시작일은 정산과 같은 규칙', () => {
+    const p = [priced('2026-11-02'), buy('2026-11-03', 'b'), buy('2026-11-04', 'c'), buy('2026-11-05', 'a')]
+    // 오늘(11-10)에 기록이 없으면 오늘부터
+    expect(reenablePlan(settings('2026-11-01'), p, '2026-11-10')).toEqual({ unpriced: 3, newSince: '2026-11-10' })
+    // 오늘 이미 기록(금액 없음)이 있으면 내일부터 → 정산된 것으로 보고 다시 잡히지 않게
+    const withToday = [...p, buy('2026-11-10', 'b')]
+    expect(reenablePlan(settings('2026-11-01'), withToday, '2026-11-10')).toEqual({ unpriced: 4, newSince: '2026-11-11' })
+  })
+
+  it('"예"로 새 시작일을 쓰면 남은 금액 없는 기록이 모두 계산 범위 밖이 된다', () => {
+    const p = [buy('2026-11-03', 'b'), buy('2026-11-10', 'c')]
+    const plan = reenablePlan(settings('2026-11-01'), p, '2026-11-10')!
+    const applied = applySettingsPatch(settings('2026-11-01'), { buyerRule: 'balance', balanceSince: plan.newSince }, '2026-11-10')
+    expect(applied.balanceSince).toBe('2026-11-11')
+    expect(countUnpriced(p, balanceWindow(applied))).toBe(0)
+    expect(reenablePlan(applied, p, '2026-11-10')).toBeNull() // 같은 상태에서 또 묻지 않는다
+  })
+
+  it('"아니요"면 이전 시작일을 그대로 유지한다', () => {
+    const kept = applySettingsPatch(settings('2026-11-01'), { buyerRule: 'balance' }, '2026-11-10')
+    expect(kept.balanceSince).toBe('2026-11-01')
+  })
+})
+
+describe('applySettingsPatch', () => {
+  const base = { buyerRule: 'count' as const, defaultPriceMode: 'none' as const }
+  it('차액 기준을 처음 켜면 시작일은 오늘, 금액 기본값 없음은 상세로', () => {
+    expect(applySettingsPatch(base, { buyerRule: 'balance' }, '2026-11-10')).toEqual({
+      buyerRule: 'balance',
+      defaultPriceMode: 'detail',
+      balanceSince: '2026-11-10',
+    })
+  })
+  it('이미 시작일이 있으면 유지하고, 간단 모드 기본값도 유지', () => {
+    const s = applySettingsPatch({ ...base, defaultPriceMode: 'simple', balanceSince: '2026-11-01' }, { buyerRule: 'balance' }, '2026-11-10')
+    expect(s).toMatchObject({ balanceSince: '2026-11-01', defaultPriceMode: 'simple' })
+  })
+  it('횟수 기준으로 돌려도 시작일은 지우지 않는다', () => {
+    expect(applySettingsPatch({ ...base, buyerRule: 'balance', balanceSince: '2026-11-01' }, { buyerRule: 'count' }, '2026-11-10').balanceSince).toBe('2026-11-01')
   })
 })

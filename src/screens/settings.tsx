@@ -13,7 +13,7 @@ import { downloadJson } from '@/lib/data'
 import { won } from '@/lib/format'
 import { readMetrics } from '@/lib/metrics'
 import { formatMD } from '@/logic/dates'
-import { nextSettlementDate, priceKey } from '@/logic/fairness'
+import { nextSettlementDate, priceKey, reenablePlan, type ReenablePlan } from '@/logic/fairness'
 import { PRESET_MENUS } from '@/logic/menu'
 import { MEMBER_COLORS, MEMBER_EMOJIS, memberStyle, suggestStyle } from '@/lib/members'
 import { cn } from '@/lib/utils'
@@ -377,6 +377,10 @@ function BuyerRuleCard() {
   const toast = useToast()
   const { buyerRule, defaultPriceMode, balanceSince } = data.settings
   const [confirm, setConfirm] = useState(false)
+  const [reenable, setReenable] = useState<ReenablePlan | null>(null)
+  const lastPlan = useRef<ReenablePlan | null>(null)
+  if (reenable) lastPlan.current = reenable
+  const plan = lastPlan.current
   const nextStart = nextSettlementDate(today, data.purchases)
 
   const modeOptions: { value: PriceMode; label: string }[] = [
@@ -391,7 +395,12 @@ function BuyerRuleCard() {
       <Segmented<BuyerRule>
         id="buyer-rule"
         value={buyerRule}
-        onChange={(v) => setSettings({ buyerRule: v })}
+        onChange={(v) => {
+          // 차액 기준을 다시 켤 때, 이전 시작일 이후에 금액 없는 기록이 있으면 먼저 물어본다
+          const p = v === 'balance' ? reenablePlan(data.settings, data.purchases, today) : null
+          if (p) setReenable(p)
+          else setSettings({ buyerRule: v })
+        }}
         options={[
           { value: 'count', label: '횟수' },
           { value: 'balance', label: '차액' },
@@ -425,6 +434,38 @@ function BuyerRuleCard() {
       <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
         {defaultPriceMode === 'none' ? '금액을 묻지 않고 한 번 탭으로 기록해요.' : '[샀어요]를 누르면 금액 입력 창이 열려요.'}
       </p>
+
+      <Sheet
+        open={!!reenable}
+        onOpenChange={(o) => !o && setReenable(null)}
+        title={`금액 없는 기록 ${plan?.unpriced ?? 0}건이 있어요`}
+        description={`오늘부터 새로 계산할까요? 정산과 같은 규칙으로 ${plan ? formatMD(plan.newSince) : ''} 기록부터 다시 계산해요. 아니요를 누르면 이전 시작일(${data.settings.balanceSince ? formatMD(data.settings.balanceSince) : ''})을 그대로 써요.`}
+      >
+        <div className="flex gap-2 pt-2">
+          <Button
+            variant="soft"
+            size="lg"
+            className="flex-1"
+            onClick={() => {
+              setSettings({ buyerRule: 'balance' })
+              setReenable(null)
+            }}
+          >
+            아니요
+          </Button>
+          <Button
+            size="lg"
+            className="flex-1"
+            onClick={() => {
+              if (plan) setSettings({ buyerRule: 'balance', balanceSince: plan.newSince })
+              setReenable(null)
+              toast({ message: `${plan ? formatMD(plan.newSince) : ''}부터 새로 계산해요`, duration: 3000 })
+            }}
+          >
+            예, 새로 계산
+          </Button>
+        </div>
+      </Sheet>
 
       <Sheet
         open={confirm}

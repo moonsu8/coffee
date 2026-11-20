@@ -4,7 +4,7 @@ import { EMPTY_DATA, loadInitialData, parseAppData, saveData } from '../lib/data
 import { suggestStyle } from '../lib/members'
 import { uid } from '../lib/utils'
 import { today as todayStr } from '../logic/dates'
-import { nextSettlementDate, priceKey, upsertPrices, type PriceInput } from '../logic/fairness'
+import { applySettingsPatch, nextSettlementDate, priceKey, upsertPrices, type PriceInput } from '../logic/fairness'
 
 type MemberPatch = Partial<Pick<Member, 'name' | 'color' | 'emoji'>> & { favorite?: Order | null }
 
@@ -206,15 +206,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (inputs.length) set((d) => ({ ...d, priceList: upsertPrices(d.priceList, inputs, Date.now()) }))
       },
       removePrice: (key) => set((d) => ({ ...d, priceList: d.priceList.filter((e) => priceKey(e) !== key) })),
-      setSettings: (patch) =>
-        set((d) => {
-          const s = { ...d.settings, ...patch }
-          if (patch.buyerRule === 'balance') {
-            if (!s.balanceSince) s.balanceSince = todayStr()
-            if (s.defaultPriceMode === 'none') s.defaultPriceMode = 'detail'
-          }
-          return { ...d, settings: s }
-        }),
+      setSettings: (patch) => set((d) => ({ ...d, settings: applySettingsPatch(d.settings, patch, todayStr()) })),
       settleBalance: () =>
         set((d) => ({ ...d, settings: { ...d.settings, balanceSince: nextSettlementDate(todayStr(), d.purchases) } })),
 

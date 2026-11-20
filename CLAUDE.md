@@ -58,6 +58,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - **당번 기준 "차액"**: `nextBuyer.ts`의 `BuyerContext.settings`가 있고 `buyerRule === 'balance'`면 차액이 가장 작은 사람이 먼저(동률이면 기존 횟수 규칙). `settings`가 없으면 기존 횟수 기준 그대로. 순번용 차액은 **`balanceSince` 이후, 계산 날짜 이전 기록만** 쓰고 통계 탭의 기간 토글과는 분리. 예상 순번(`forecastBuyers`)은 가상 구매에 금액이 없어 산 사람을 뒤로 보내는 "추정".
 - `balanceSince`: 차액 기준을 처음 켤 때 오늘로 설정(이미 있으면 유지). "정산 완료, 오늘부터 다시 계산"은 `nextSettlementDate`: 오늘 이미 기록된 구매가 있으면 내일부터, 없으면 오늘부터 센다(정산된 기록이 다시 잡히지 않도록).
 - 차액 기준에서는 [샀어요]의 "금액 없음"이 선택지에 없고(항상 금액 시트), 금액 기본값 '없음'은 '상세'로 바뀐다. 지난 기록 편집에서 `balanceSince` 이후 기록의 금액을 지우면 "차액 계산에서 빠져 당번 순서가 달라질 수 있어요" 경고. 통계 "커피 수지" 카드는 멤버 순서로만 표시(순위·강조 없음), `balanceSince` 이후 금액 없는 기록이 있으면 건수를 경고로 표시.
+- 차액 기준을 **다시** 켤 때(`balanceSince`가 이미 있을 때) 그 이후 금액 없는 기록이 있으면 "금액 없는 기록 N건이 있어요. 오늘부터 새로 계산할까요?" 확인(`reenablePlan`). 예 → 정산과 같은 규칙(`nextSettlementDate`)으로 `balanceSince` 갱신, 아니요 → 이전 시작일 유지, 창을 닫으면 켜기 취소. 설정 변경 규칙은 순수 함수 `applySettingsPatch`.
 - 횟수 기준 + 금액 기본값 "없음"(기본)이면 [샀어요]는 예전처럼 한 번 탭으로 기록된다.
 
 ## 데이터 마이그레이션 (중요: 기존 기록을 잃지 않는 것이 최우선)
@@ -71,7 +72,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 128개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 테스트 137개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
 - **미확인**: 주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)

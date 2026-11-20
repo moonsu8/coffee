@@ -143,6 +143,36 @@ export function nextSettlementDate(today: DateStr, purchases: Purchase[]): DateS
   return purchases.some((p) => p.date === today) ? addDays(today, 1) : today
 }
 
+/**
+ * 설정 변경 규칙 (스토어가 그대로 사용).
+ * - 차액 기준을 켤 때 balanceSince가 없으면 오늘로 정한다 (이미 있으면 유지, 직접 넘긴 값이 있으면 그 값)
+ * - 차액 기준에서는 금액 기본값 '없음'을 쓸 수 없으므로 '상세'로 바꾼다
+ */
+export function applySettingsPatch(s: Settings, patch: Partial<Settings>, today: DateStr): Settings {
+  const next = { ...s, ...patch }
+  if (patch.buyerRule === 'balance') {
+    if (!next.balanceSince) next.balanceSince = today
+    if (next.defaultPriceMode === 'none') next.defaultPriceMode = 'detail'
+  }
+  return next
+}
+
+export interface ReenablePlan {
+  unpriced: number // 기존 balanceSince 이후 금액 없는 기록 수
+  newSince: DateStr // "예"를 누르면 새로 정하는 시작일 (정산과 같은 규칙)
+}
+
+/**
+ * 차액 기준을 '다시' 켤 때 확인이 필요한지.
+ * balanceSince가 이미 있고 그 이후에 금액 없는 기록이 있으면 확인 대상 (처음 켜는 경우는 해당 없음).
+ */
+export function reenablePlan(settings: Settings, purchases: Purchase[], today: DateStr): ReenablePlan | null {
+  if (!settings.balanceSince) return null
+  const unpriced = countUnpriced(purchases, balanceWindow(settings))
+  if (unpriced === 0) return null
+  return { unpriced, newSince: nextSettlementDate(today, purchases) }
+}
+
 /* ───────── 가격표 ───────── */
 
 export type PriceKey = Pick<Order, 'menu' | 'temp'> & { size?: string }
