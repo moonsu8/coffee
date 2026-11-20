@@ -10,3 +10,9 @@ export const digitsOnly = (s: string) => s.replace(/\D/g, '').slice(0, 9).replac
 
 /** 숫자 문자열 → 천 단위 쉼표 */
 export const groupDigits = (s: string) => (s ? Number(s).toLocaleString('ko-KR') : '')
+
+/** 저장 시각: "11월 20일 15시" */
+export function formatSavedAt(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${d.getHours()}시`
+}

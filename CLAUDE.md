@@ -66,13 +66,27 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - v1 → v2: 기존 필드는 값 그대로 보존하고 새 필드만 채운다. 멤버 `order` 값은 재번호하지 않고, 탈퇴한 멤버의 구매·휴가 기록도 버리지 않으며, 휴가 from/to도 뒤집지 않는다.
 - 앱보다 새로운 `schemaVersion`은 `FutureVersionError`로 읽지 않는다. localStorage가 미래 버전이면 앱이 "업데이트해 주세요" 화면만 띄우고 **저장을 막는다**(구버전 앱이 덮어써 잃는 것 방지).
 - 안전장치: 구버전을 처음 옮길 때 원본을 `coffee-duty:backup-before-v2`에 한 번 보관, 읽을 수 없는 저장값은 초기 데이터로 덮어쓰기 전에 `coffee-duty:corrupt-backup`에 보관. 저장 키 `coffee-duty:v1`은 그대로 쓴다.
+- **shadow(마지막 정상 상태)**: 저장할 때마다 메인(`coffee-duty:v1`)과 함께 전체 데이터를 `coffee-duty:shadow`에도 쓴다(`updatedAt` 포함). 이미 배포된 옛 버전 앱(`42cb18e`)은 `schemaVersion`을 검사하지 않고 **열기만 해도** 아는 필드만 남겨 다시 저장해 `orders`·`priceList`·`pricing`·`favorite`·`settings`를 지우므로, 그 경우를 감지하기 위한 장치다. 옛 앱은 shadow 키를 모른다.
+  - 로드 시 메인이 v1 모양(schemaVersion 없음)인데 v2 shadow가 있고 더 최신이면(또는 메인이 읽을 수 없는데 정상 shadow가 있으면) **자동 복구/병합하지 않고** 바텀시트로 묻는다. 묻는 동안에는 저장하지 않는다(shadow가 덮어써지지 않도록).
+  - "되돌리기": 지금 메인을 `coffee-duty:backup-before-restore`에 남기고 shadow 전체를 복원. "그대로 두기": 메인을 정상 마이그레이션하고 이전 shadow는 `coffee-duty:shadow-prev`에 보관. 보관에 실패하면 선택을 확정하지 않는다.
+  - shadow가 없거나 깨졌거나 v2가 아니면(미래 버전 포함) 조용히 무시한다. 설정 > 데이터의 "마지막 정상 상태로 되돌리기"는 같은 복원을 수동으로 한다. 로직은 `lib/data.ts`(`readShadow`/`isOverwrittenByOldApp`/`applyRecovery`/`restoreLastGood`), 테스트는 `lib/shadow.test.ts`.
 - **실제 데이터 검증**: 총무 폰에서 내보낸 JSON을 `backup/`에 넣고 `npm run check:migration`. 개수·값 일치 여부만 출력(실명 미출력), 원본은 읽기만 한다. `backup/`은 `.gitignore`에 있고 **절대 커밋하지 않는다**(실명 포함). 배포 전에 이 검증을 통과시킨다.
+
+## 배포 규칙 (운영)
+이 저장소는 `main`에 push하면 곧바로 배포되고, 총무 폰에 실제 기록이 있다. 이미 배포된 옛 버전은 v2 데이터의 모르는 필드를 지워 버릴 수 있으므로 다음을 지킨다.
+- **롤백 금지.** 문제가 생기면 이전 커밋으로 되돌리지 말고 **수정본을 앞으로만(roll forward) 배포**한다. 옛 코드가 v2 데이터 위에서 열리면 `orders`·`priceList`·`pricing` 등이 지워진다. `git revert`로 되돌리는 새 커밋도 옛 코드를 다시 배포하는 것이므로 데이터 구조(스키마)가 달라지는 변경은 revert하지 않는다.
+- **옛 Actions 실행 재실행 금지.** Actions 탭에서 과거 실행의 "Re-run"을 누르면 그때의 옛 코드가 다시 배포된다. 수동 배포는 항상 최신 `main`에서 "Run workflow"로 한다.
+- push 전에 총무 폰에서 JSON을 내보내 `backup/`에 넣고 `npm run check:migration`을 통과시킨다(`backup/`은 실명 포함이라 절대 커밋하지 않는다).
+- 배포 직후 총무 폰에서 설치 앱과 브라우저 탭을 **모두 닫았다가 다시 연다.** 가능하면 설치 앱만 쓰고, 같은 사이트를 브라우저 탭으로 같이 열어 두지 않는다(오래 열려 있던 옛 화면이 저장하면 덮어쓸 수 있다).
+- 서비스 워커는 `autoUpdate`(`skipWaiting` + `clientsClaim`, 갱신되면 열린 화면을 자동 새로고침)다. 배포 직후 첫 실행은 캐시된 옛 화면이 먼저 뜰 수 있으니 한 번 더 열어 최신인지 확인한다.
+- 그래도 데이터가 사라져 보이면: 앱을 다시 열 때 "마지막 정상 상태로 되돌릴까요?"가 뜨면 되돌리기를 선택하고, 안 뜨면 설정 > 데이터 > "마지막 정상 상태로 되돌리기"를 쓴다. 그 전에 데이터를 더 수정하지 않는다.
+- 새 버전이 안정적으로 퍼진 뒤에도, 스키마를 바꾸는 배포는 한 번에 한 단계씩, 로컬에서 `check:migration`과 화면 확인을 끝낸 뒤에만 한다.
 
 ## 개발 규칙
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 137개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 테스트 161개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
 - **미확인**: 주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)

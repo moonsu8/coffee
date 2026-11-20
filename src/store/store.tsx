@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AppData, DateStr, DayOrder, Member, Order, OrderItem, Purchase, Settings } from '../types'
-import { EMPTY_DATA, loadInitialData, parseAppData, saveData } from '../lib/data'
+import { applyRecovery, EMPTY_DATA, loadInitialData, parseAppData, restoreLastGood as restoreShadow, saveData, type Recovery } from '../lib/data'
+import { formatSavedAt } from '../lib/format'
+import { Button } from '../components/ui/button'
+import { Sheet } from '../components/ui/sheet'
 import { suggestStyle } from '../lib/members'
 import { uid } from '../lib/utils'
 import { today as todayStr } from '../logic/dates'
@@ -40,6 +43,8 @@ interface Store {
   settleBalance: () => void
   importJson: (text: string) => void
   resetToInitial: () => Promise<void>
+  /** 마지막 정상 상태(shadow)로 되돌림. 되돌릴 상태가 없거나 보관에 실패하면 false */
+  restoreLastGood: () => boolean
 }
 
 const Ctx = createContext<Store | null>(null)
@@ -54,6 +59,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(EMPTY_DATA)
   const [ready, setReady] = useState(false)
   const [blocked, setBlocked] = useState<string | undefined>()
+  // 옛 버전 앱이 덮어썼을 가능성이 있을 때: 사용자가 고르기 전까지 저장하지 않는다
+  const [recovery, setRecovery] = useState<Recovery | undefined>()
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
   const [today, setToday] = useState(todayStr())
   const ref = useRef(data)
   ref.current = data
@@ -62,13 +70,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     loadInitialData().then((r) => {
       setData(r.data)
       setBlocked(r.blocked)
+      setRecovery(r.recovery)
       setReady(true)
     })
   }, [])
 
   useEffect(() => {
-    if (ready && !blocked) saveData(data)
-  }, [data, ready, blocked])
+    if (ready && !blocked && !recovery) saveData(data)
+  }, [data, ready, blocked, recovery])
 
   // 자정을 넘기거나 앱으로 돌아왔을 때 '오늘' 갱신
   useEffect(() => {
@@ -213,6 +222,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       importJson: (text) => {
         setData(parseAppData(JSON.parse(text))) // 실패(형식 오류·미래 버전)하면 throw → 호출측에서 안내
       },
+      restoreLastGood: () => {
+        const restored = restoreShadow(ref.current)
+        if (!restored) return false
+        set(() => restored)
+        return true
+      },
       resetToInitial: async () => {
         try {
           const res = await fetch(`${import.meta.env.BASE_URL}data.json`, { cache: 'no-cache' })
@@ -237,5 +252,58 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       </div>
     )
   }
-  return <Ctx.Provider value={store}>{children}</Ctx.Provider>
+  return (
+    <Ctx.Provider value={store}>
+      {children}
+      <RecoverySheet
+        recovery={recovery}
+        failed={recoveryFailed}
+        onChoose={(choice) => {
+          if (!recovery) return
+          const r = applyRecovery(choice, recovery, ref.current)
+          if (!r.ok) return setRecoveryFailed(true) // 보관에 실패하면 선택을 확정하지 않는다
+          setData(r.data)
+          setRecovery(undefined)
+        }}
+      />
+    </Ctx.Provider>
+  )
+}
+
+/** 옛 버전 앱이 데이터를 지웠을 수 있을 때 묻는 시트. 버튼으로만 닫힌다(실수로 넘기지 않도록) */
+function RecoverySheet({
+  recovery,
+  failed,
+  onChoose,
+}: {
+  recovery?: Recovery
+  failed: boolean
+  onChoose: (c: 'restore' | 'keep') => void
+}) {
+  const last = useRef(recovery)
+  if (recovery) last.current = recovery
+  const r = last.current
+  return (
+    <Sheet
+      open={!!recovery}
+      onOpenChange={() => {}}
+      title="마지막 정상 상태로 되돌릴까요?"
+      description={`이전 버전 앱이 일부 데이터를 지웠을 수 있어요. 마지막 정상 상태(${r ? formatSavedAt(r.savedAt) : ''})로 되돌릴까요?`}
+    >
+      <div className="space-y-3 pb-2">
+        <p className="text-[13px] leading-relaxed text-ink-2">
+          되돌리면 지금 상태는 백업으로 남겨 둬요. 그대로 두면 지금 상태를 새 형식으로 옮기고, 정상 상태였던 데이터는 따로 보관해요.
+        </p>
+        {failed && <p className="text-[13px] font-semibold text-danger">저장 공간이 부족해서 보관하지 못했어요. 다시 시도하거나 공간을 확보해 주세요.</p>}
+        <div className="flex gap-2">
+          <Button variant="soft" size="lg" className="flex-1" onClick={() => onChoose('keep')}>
+            그대로 두기
+          </Button>
+          <Button size="lg" className="flex-1" onClick={() => onChoose('restore')}>
+            되돌리기
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  )
 }

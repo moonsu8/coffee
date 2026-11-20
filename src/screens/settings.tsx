@@ -1,5 +1,5 @@
 import { Reorder, useDragControls } from 'framer-motion'
-import { Download, GripVertical, Plus, RotateCcw, Smartphone, Trash2, Upload, X } from 'lucide-react'
+import { Download, GripVertical, History, Plus, RotateCcw, Smartphone, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, PageHeader, Segmented, SectionTitle } from '@/components/common'
@@ -9,8 +9,8 @@ import { fieldsFromOrder, OrderFields, orderFromFields } from '@/components/orde
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
-import { downloadJson } from '@/lib/data'
-import { won } from '@/lib/format'
+import { downloadJson, readShadow } from '@/lib/data'
+import { formatSavedAt, won } from '@/lib/format'
 import { readMetrics } from '@/lib/metrics'
 import { formatMD } from '@/logic/dates'
 import { nextSettlementDate, priceKey, reenablePlan, type ReenablePlan } from '@/logic/fairness'
@@ -23,12 +23,13 @@ import type { BuyerRule, Member, PriceEntry, PriceMode } from '@/types'
 type Editing = { mode: 'add' } | { mode: 'edit'; member: Member } | null
 
 export function SettingsScreen() {
-  const { data, today, reorderMembers, removeMember, importJson, resetToInitial, addCustomMenu, removeCustomMenu } = useStore()
+  const { data, today, reorderMembers, removeMember, importJson, resetToInitial, restoreLastGood, addCustomMenu, removeCustomMenu } = useStore()
   const [menuInput, setMenuInput] = useState('')
   const toast = useToast()
   const [editing, setEditing] = useState<Editing>(null)
   const [deleting, setDeleting] = useState<Member | null>(null)
-  const [confirm, setConfirm] = useState<null | { kind: 'reset' } | { kind: 'import'; text: string }>(null)
+  const [confirm, setConfirm] = useState<null | { kind: 'reset' } | { kind: 'restore' } | { kind: 'import'; text: string }>(null)
+  const lastGood = readShadow() // 마지막 정상 상태(저장 때마다 갱신되는 복사본)
   const [installOpen, setInstallOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   // 드래그 중에는 로컬 상태로 부드럽게, 드롭 시점에 저장
@@ -145,7 +146,13 @@ export function SettingsScreen() {
             </Button>
           </div>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => onFile(e.target.files?.[0])} />
-          <Button variant="ghost" className="mt-2 w-full" onClick={() => setConfirm({ kind: 'reset' })}>
+          <Button variant="ghost" className="mt-2 w-full" disabled={!lastGood} onClick={() => setConfirm({ kind: 'restore' })}>
+            <History size={17} /> 마지막 정상 상태로 되돌리기
+          </Button>
+          <p className="mt-1 text-center text-[13px] text-ink-2">
+            {lastGood ? `저장 시각: ${formatSavedAt(lastGood.savedAt)}` : '저장된 정상 상태가 없어요'}
+          </p>
+          <Button variant="ghost" className="mt-1 w-full" onClick={() => setConfirm({ kind: 'reset' })}>
             <RotateCcw size={17} /> 초기 데이터로 되돌리기
           </Button>
         </Card>
@@ -178,8 +185,12 @@ export function SettingsScreen() {
       <Sheet
         open={!!confirm}
         onOpenChange={(o) => !o && setConfirm(null)}
-        title={confirm?.kind === 'import' ? '이 파일로 바꿀까요?' : '초기 데이터로 되돌릴까요?'}
-        description="지금 저장된 멤버·기록·휴가가 모두 교체돼요. 먼저 내보내기로 백업해 두면 안전해요."
+        title={confirm?.kind === 'import' ? '이 파일로 바꿀까요?' : confirm?.kind === 'restore' ? '마지막 정상 상태로 되돌릴까요?' : '초기 데이터로 되돌릴까요?'}
+        description={
+          confirm?.kind === 'restore'
+            ? `${lastGood ? formatSavedAt(lastGood.savedAt) : ''} 상태로 되돌려요. 지금 상태는 백업으로 남겨 두지만, 그 이후의 변경은 화면에서 사라져요.`
+            : '지금 저장된 멤버·기록·휴가가 모두 교체돼요. 먼저 내보내기로 백업해 두면 안전해요.'
+        }
       >
         <div className="flex gap-2 pt-2">
           <Button variant="soft" size="lg" className="flex-1" onClick={() => setConfirm(null)}>
@@ -190,16 +201,21 @@ export function SettingsScreen() {
             className="flex-1"
             onClick={async () => {
               try {
-                if (confirm?.kind === 'import') importJson(confirm.text)
-                else await resetToInitial()
-                toast({ message: '데이터를 바꿨어요', duration: 3000 })
+                if (confirm?.kind === 'restore') {
+                  if (!restoreLastGood()) throw new Error('되돌릴 수 없었어요. 저장 공간을 확인해 주세요')
+                  toast({ message: '마지막 정상 상태로 되돌렸어요', duration: 3000 })
+                } else {
+                  if (confirm?.kind === 'import') importJson(confirm.text)
+                  else await resetToInitial()
+                  toast({ message: '데이터를 바꿨어요', duration: 3000 })
+                }
               } catch (e) {
                 toast({ message: e instanceof Error ? e.message : '가져오기에 실패했어요', duration: 4000 })
               }
               setConfirm(null)
             }}
           >
-            바꾸기
+            {confirm?.kind === 'restore' ? '되돌리기' : '바꾸기'}
           </Button>
         </div>
       </Sheet>
