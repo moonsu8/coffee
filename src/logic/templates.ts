@@ -91,7 +91,7 @@ export const PRESETS: TemplatePreset[] = [
     emoji: '🧹',
     blurb: '청소 당번',
     actionLabel: '청소했어요',
-    schedule: [5],
+    schedule: 'weekdays',
     fairness: 'count',
     ...base,
     themeId: 'clean',
