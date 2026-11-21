@@ -1,4 +1,6 @@
-import type { AppData, Absence, CoffeeData, DateStr, Group, GroupView, Settings, Template } from '../types'
+import type { AppData, Absence, CoffeeData, DateStr, Group, GroupConfig, GroupView, Member, Schedule, Settings, Template } from '../types'
+import { normalizeSchedule } from './schedule'
+import { configOf, presetById } from './templates'
 
 /** 그룹 이모지 선택지 */
 export const GROUP_EMOJIS = ['☕', '🍱', '🧹', '📝', '🎤', '🛒', '🚗', '🎲', '🍚', '📚', '🧺', '🎁']
@@ -15,33 +17,50 @@ export const emptyCoffee = (): CoffeeData => ({
   settings: { ...DEFAULT_SETTINGS },
 })
 
-export const TEMPLATE_INFO: Record<Template, { label: string; emoji: string; defaultName: string; blurb: string }> = {
-  coffee: { label: '커피', emoji: '☕', defaultName: '커피', blurb: '주문 취합, 금액 정산까지 지금 기능 전부' },
-  general: { label: '일반', emoji: '🧹', defaultName: '청소', blurb: '순번만 돌려요 (점심·청소·회의록·발표 등)' },
+/** 금액 기능이 있는 그룹인가 (화면·로직이 보는 기능 묶음) */
+export const templateOf = (c: GroupConfig): Template => (c.fairness === 'money' ? 'coffee' : 'general')
+
+export interface NewGroupInput {
+  name: string
+  emoji: string
+  config: GroupConfig
+  schedule: Schedule
+  members?: Member[]
 }
 
-export function newGroup(id: string, template: Template, name: string, emoji: string): Group {
+export function newGroup(id: string, input: NewGroupInput): Group {
   return {
     id,
-    name,
-    template,
-    emoji,
-    members: [],
+    name: input.name,
+    emoji: input.emoji,
+    config: input.config,
+    schedule: input.schedule,
+    members: input.members ?? [],
     records: [],
     absences: [],
     skipDays: [],
-    ...(template === 'coffee' ? { coffee: emptyCoffee() } : {}),
+    ...(input.config.fairness === 'money' ? { coffee: emptyCoffee() } : {}),
   }
 }
 
-/** 저장 구조(그룹) → 화면/로직이 쓰는 보기. 일반 템플릿의 커피 전용 값은 빈 기본값 */
+/** 기본 커피 그룹 (처음 설치·초기화) */
+export const defaultCoffeeGroup = (): Group => {
+  const p = presetById('coffee')
+  return newGroup(COFFEE_GROUP_ID, { name: p.name, emoji: p.emoji, config: configOf(p), schedule: p.schedule })
+}
+
+/** 저장 구조(그룹) → 화면/로직이 쓰는 보기. 금액 기능이 없으면 커피 전용 값은 빈 기본값 */
 export function groupToView(g: Group): GroupView {
-  const c = g.template === 'coffee' ? (g.coffee ?? emptyCoffee()) : emptyCoffee()
+  const money = g.config.fairness === 'money'
+  const c = money ? (g.coffee ?? emptyCoffee()) : emptyCoffee()
   return {
     groupId: g.id,
     name: g.name,
-    template: g.template,
+    template: templateOf(g.config),
     emoji: g.emoji,
+    config: g.config,
+    schedule: g.schedule,
+    hasOrders: money && g.config.orders,
     members: g.members,
     purchases: g.records,
     absences: g.absences,
@@ -53,19 +72,20 @@ export function groupToView(g: Group): GroupView {
   }
 }
 
-/** 보기에서 바뀐 값을 그룹에 되돌려 쓴다 (이름·이모지·템플릿은 보기로 바꾸지 않는다) */
+/** 보기에서 바뀐 값을 그룹에 되돌려 쓴다 (이름·이모지·설정·요일은 보기로 바꾸지 않는다) */
 export function applyView(g: Group, v: GroupView): Group {
   const base: Group = {
     id: g.id,
     name: g.name,
-    template: g.template,
     emoji: g.emoji,
+    config: g.config,
+    schedule: g.schedule,
     members: v.members,
     records: v.purchases,
     absences: v.absences,
     skipDays: v.skipDays,
   }
-  return g.template === 'coffee'
+  return g.config.fairness === 'money'
     ? { ...base, coffee: { orders: v.orders, customMenus: v.customMenus, priceList: v.priceList, settings: v.settings } }
     : base
 }
@@ -145,9 +165,29 @@ export const TERMS: Record<Template, Terms> = {
   },
 }
 
-/** 공유 텍스트 머리말: 커피는 지금 그대로 "☕", 일반은 "🧹 청소" */
-export function sharePrefix(g: Pick<GroupView, 'template' | 'emoji' | 'name'>): string {
-  return g.template === 'coffee' ? '☕' : `${g.emoji} ${g.name}`
+/**
+ * 그룹 설정(config)에서 용어를 만든다. 커피 템플릿과 기본 문구("했어요")는 지금 문구 그대로이고,
+ * 다른 버튼 문구는 일반 용어에 그 문구를 끼워 만든다.
+ */
+export function termsOf(c: GroupConfig): Terms {
+  if (c.presetId === 'coffee') return TERMS.coffee
+  const a = c.actionLabel
+  if (a === '했어요') return TERMS.general
+  const g = TERMS.general
+  return {
+    ...g,
+    doneBtn: a,
+    otherBtn: `다른 사람이 ${a}`,
+    whoSheet: `누가 ${a}?`,
+    whoField: `누가 ${a}?`,
+    kingTitle: '이번 달 가장 많이 한 사람 👑',
+    kingCount: (n) => `${n}번 ${a}`,
+  }
+}
+
+/** 공유 텍스트 머리말: 커피는 "☕", 그 외 "{이모지} {이름}" (config.shareFormat) */
+export function sharePrefix(g: Pick<GroupView, 'config' | 'emoji' | 'name'>): string {
+  return g.config.shareFormat.replace('{emoji}', g.emoji).replace('{name}', g.name)
 }
 
 /* ───────── 휴가 "모든 그룹에 적용" ───────── */
@@ -213,18 +253,18 @@ export function withGroupAdded(root: AppData, g: Group, now = Date.now()): AppDa
   return { ...root, groups: [...root.groups, g], updatedAt: now }
 }
 
-/** 이름·이모지 변경 (빈 이름은 무시). 템플릿은 바꾸지 않는다 */
+/** 이름·이모지·요일 변경 (빈 이름은 무시). 템플릿 설정은 바꾸지 않는다 */
 export function withGroupEdited(
   root: AppData,
   id: string,
-  patch: { name?: string; emoji?: string },
+  patch: { name?: string; emoji?: string; schedule?: Schedule },
   now = Date.now(),
 ): AppData {
   return {
     ...root,
     groups: root.groups.map((g) =>
       g.id === id
-        ? { ...g, name: patch.name !== undefined ? patch.name.trim() || g.name : g.name, emoji: patch.emoji || g.emoji }
+        ? { ...g, name: patch.name !== undefined ? patch.name.trim() || g.name : g.name, emoji: patch.emoji || g.emoji, schedule: patch.schedule ? normalizeSchedule(patch.schedule) : g.schedule }
         : g,
     ),
     updatedAt: now,

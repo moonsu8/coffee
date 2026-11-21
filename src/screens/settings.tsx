@@ -90,7 +90,7 @@ export function SettingsScreen() {
           {list.length === 0 && <p className="py-6 text-center text-ink-2">멤버를 추가해 주세요</p>}
         </Card>
 
-        {data.template === 'coffee' && (
+        {data.hasOrders && (
           <>
         <Card>
           <SectionTitle>메뉴 목록</SectionTitle>
@@ -132,10 +132,10 @@ export function SettingsScreen() {
           </form>
         </Card>
 
-        <BuyerRuleCard />
-        <PriceListCard />
           </>
         )}
+        {data.template === 'coffee' && <BuyerRuleCard />}
+        {data.hasOrders && <PriceListCard />}
 
         <Card>
           <SectionTitle>앱</SectionTitle>
@@ -353,7 +353,7 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
           ))}
         </div>
       </div>
-      {data.template === 'coffee' && (
+      {data.hasOrders && (
         <div className="border-t border-line pt-5">
           <p className="mb-3 text-[15px] font-bold">기본 메뉴</p>
           <OrderFields value={fav} onChange={setFav} customMenus={data.customMenus} allowNone idPrefix="fav" />

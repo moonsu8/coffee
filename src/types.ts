@@ -1,7 +1,7 @@
 export type DateStr = string // 'YYYY-MM-DD' (로컬 날짜)
 
 /** 데이터 구조 버전. 구조를 바꿀 때마다 올리고 lib/migrate.ts에 이전 단계를 추가한다 */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export type Temp = 'ice' | 'hot'
 export type Size = 'S' | 'M' | 'L'
@@ -82,8 +82,31 @@ export interface DayOrder {
   updatedAt: number
 }
 
-/** 그룹 템플릿: 커피(주문·금액 포함 전체 기능) / 일반(순번만: 점심·청소·회의록·발표 등) */
+/**
+ * 기능 묶음(화면·로직이 보는 값). 'coffee' = 금액·차액·가격표 기능을 켠 그룹(config.fairness === 'money'),
+ * 'general' = 순번(횟수)만. 저장하지 않고 config에서 계산한다.
+ */
 export type Template = 'coffee' | 'general'
+
+/** 담당하는 날: 평일(기본) / 매일 / 특정 요일(0=일 … 6=토) */
+export type Schedule = 'weekdays' | 'daily' | number[]
+
+/** 그룹 테마(색·일러스트·컨페티). 목록에서 고르기만 하고 자유 색상은 없다 */
+export const THEME_IDS = ['coffee', 'lunch', 'notes', 'stage', 'clean', 'recycle', 'dishes', 'walk'] as const
+export type ThemeId = (typeof THEME_IDS)[number]
+
+/**
+ * 그룹을 만들 때 템플릿에서 복사해 저장하는 값. 템플릿 상수를 나중에 바꿔도 기존 그룹은 변하지 않는다.
+ */
+export interface GroupConfig {
+  presetId: string // 어떤 템플릿으로 만들었는지(참고용). 'coffee'면 커피 전용 문구를 그대로 쓴다
+  actionLabel: string // 완료 버튼 문구 ("샀어요", "했어요" …)
+  fairness: 'count' | 'money' // 공평함 기준: 횟수 / 금액(주문·금액·차액 기능)
+  orders: boolean // 오늘의 주문(메뉴 취합) 사용. money일 때만 의미 있음
+  memoPlaceholder: string
+  shareFormat: string // 공유 텍스트 머리말. {emoji} {name} 치환
+  themeId: ThemeId
+}
 
 /** 커피 템플릿에만 있는 데이터 */
 export interface CoffeeData {
@@ -97,16 +120,17 @@ export interface CoffeeData {
 export interface Group {
   id: string
   name: string
-  template: Template
   emoji: string
+  config: GroupConfig
+  schedule: Schedule
   members: Member[]
   records: Purchase[] // 날짜별 기록 (커피는 구매, 일반은 담당 기록). 날짜가 키
   absences: Absence[]
   skipDays: DateStr[]
-  coffee?: CoffeeData // template이 'coffee'일 때만
+  coffee?: CoffeeData // config.fairness가 'money'일 때만
 }
 
-/** 저장되는 전체 데이터 (v3) */
+/** 저장되는 전체 데이터 (v4) */
 export interface AppData {
   schemaVersion: number
   groups: Group[] // 항상 1개 이상
@@ -120,8 +144,11 @@ export interface AppData {
 export interface GroupView {
   groupId: string
   name: string
-  template: Template
+  template: Template // config에서 계산: money면 'coffee'
   emoji: string
+  config: GroupConfig
+  schedule: Schedule
+  hasOrders: boolean // 오늘의 주문 기능 (money이면서 config.orders)
   members: Member[]
   purchases: Purchase[] // = group.records
   absences: Absence[]

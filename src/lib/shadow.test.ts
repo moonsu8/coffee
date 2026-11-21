@@ -15,7 +15,8 @@ import {
 } from './data'
 import { formatSavedAt } from './format'
 import { migrate, serialize } from './migrate'
-import { groupToView, newGroup, withGroupAdded } from '../logic/groups'
+import { groupToView, withGroupAdded } from '../logic/groups'
+import { legacyGroup } from './testing'
 import type { AppData } from '../types'
 
 class MemoryStorage implements StorageLike {
@@ -64,7 +65,7 @@ const v2Raw = (updatedAt: number) => ({
 // 새 버전(v3)이 저장하는 데이터: 커피 그룹 + 청소 그룹
 const v3 = (updatedAt = 1_000): AppData => {
   const base = migrate(v2Raw(updatedAt))
-  return { ...withGroupAdded(base, newGroup('g-clean', 'general', '청소', '🧹'), updatedAt), updatedAt }
+  return { ...withGroupAdded(base, legacyGroup('g-clean', 'general', '청소', '🧹'), updatedAt), updatedAt }
 }
 const coffee = (d: AppData) => groupToView(d.groups[0])
 
@@ -162,7 +163,9 @@ describe('옛 버전 앱의 덮어쓰기 감지', () => {
     expect(isOverwrittenByOldApp(v2Raw(500), shadow)).toBe(true) // v2 모양, 더 오래됨
     expect(isOverwrittenByOldApp(v2Raw(1000), shadow)).toBe(false) // 같은 시점의 저장 = 정상
     expect(isOverwrittenByOldApp(v2Raw(5000), shadow)).toBe(false) // 메인이 더 최신
-    expect(isOverwrittenByOldApp({ schemaVersion: 3, groups: [] }, shadow)).toBe(false) // 메인이 v3면 정상
+    expect(isOverwrittenByOldApp({ schemaVersion: 4, groups: [] }, shadow)).toBe(false) // 메인이 최신 버전이면 정상
+    expect(isOverwrittenByOldApp({ schemaVersion: 3, groups: [], updatedAt: 1000 }, shadow)).toBe(false) // v3 앱이 함께 쓴 메인(같은 시점) = 정상
+    expect(isOverwrittenByOldApp({ schemaVersion: 3, groups: [], updatedAt: 500 }, shadow)).toBe(true) // v3 메인이 더 오래됨
     expect(isOverwrittenByOldApp({ members: [] }, null)).toBe(false)
     expect(isOverwrittenByOldApp({ members: [] }, { ...shadow, savedAt: 0 })).toBe(false)
   })
@@ -177,6 +180,7 @@ describe('옛 버전 앱의 덮어쓰기 감지', () => {
     expect(r.data.groups).toHaveLength(1)
     expect(coffee(r.data).priceList).toHaveLength(1)
     expect(st.getItem('coffee-duty:backup-before-v3')).toBe(raw)
+    expect(st.getItem('coffee-duty:backup-before-v4')).toBe(raw) // v4로 옮기기 직전 원본도 보관
     expect(st.getItem('coffee-duty:backup-before-v2')).toBeNull() // v1이 아니므로 v2 백업은 만들지 않는다
   })
 
@@ -244,7 +248,7 @@ describe('되돌리기 / 그대로 두기', () => {
     saveData(r.data, st) // 이후 저장은 shadow를 새 상태로 갱신
     expect(st.getItem(SHADOW_PREV_KEY)).toBe(shadowRaw) // 보관본은 그대로
     expect(readShadow(st)!.data.groups).toHaveLength(1) // shadow는 지금 상태
-    expect(JSON.parse(st.getItem(KEY)!).schemaVersion).toBe(3)
+    expect(JSON.parse(st.getItem(KEY)!).schemaVersion).toBe(4)
     expect((await loadInitialData(st, initial)).recovery).toBeUndefined()
     expect(readShadow(st, SHADOW_PREV_KEY)!.data.groups).toHaveLength(2) // 정상 상태였던 데이터는 살아 있다
   })

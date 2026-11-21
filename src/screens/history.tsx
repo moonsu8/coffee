@@ -72,7 +72,7 @@ export function HistoryScreen() {
                     const p = byDate.get(d)
                     return `${formatShort(d)} ${p ? memberById(p.memberId)?.name + terms.calSuffix : '기록 없음'}`
                   }}
-                  dayClassName={(d) => (!isBusinessDay(d, data.skipDays) ? 'opacity-60' : '')}
+                  dayClassName={(d) => (!isBusinessDay(d, data.skipDays, data.schedule) ? 'opacity-60' : '')}
                   renderDay={(d) => {
                     const p = byDate.get(d)
                     if (p) {
@@ -129,7 +129,7 @@ export function HistoryScreen() {
                               </div>
                             </div>
                           </SwipeRow>
-                          {day && data.template === 'coffee' && <OrderHistory day={day} />}
+                          {day && data.hasOrders && <OrderHistory day={day} />}
                         </li>
                       )
                     })}
@@ -258,7 +258,7 @@ function EditorBody({
           value={memo}
           maxLength={40}
           onChange={(e) => setMemo(e.target.value)}
-          placeholder="예) 아아 6잔, 디저트 포함"
+          placeholder={data.config.memoPlaceholder}
           className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
         />
       </div>

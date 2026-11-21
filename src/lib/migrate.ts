@@ -10,13 +10,16 @@ import {
   type PriceMode,
   type Pricing,
   type Group,
+  type GroupConfig,
   type Purchase,
   type Settings,
   type Size,
-  type Template,
+  THEME_IDS,
+  type ThemeId,
   DEFAULT_BRAND,
 } from '../types'
-import { COFFEE_GROUP_ID, TEMPLATE_INFO } from '../logic/groups'
+import { COFFEE_GROUP_ID } from '../logic/groups'
+import { normalizeSchedule } from '../logic/schedule'
 import { NO_DRINK } from '../logic/menu'
 import { uid } from './utils'
 
@@ -56,9 +59,9 @@ function v2ToV3(d: Raw): Raw {
     groups: [
       {
         id: COFFEE_GROUP_ID,
-        name: TEMPLATE_INFO.coffee.defaultName,
+        name: '커피',
         template: 'coffee',
-        emoji: TEMPLATE_INFO.coffee.emoji,
+        emoji: '☕',
         members: d.members,
         records: d.purchases,
         absences: d.absences,
@@ -70,7 +73,51 @@ function v2ToV3(d: Raw): Raw {
   }
 }
 
-const STEPS: Record<number, (d: Raw, now: number) => Raw> = { 1: v1ToV2, 2: v2ToV3 }
+/*
+ * v3 → v4 단계에서 쓰는 설정 값. 템플릿 상수(logic/templates.ts)와 별개로 고정해 둔다:
+ * 템플릿을 나중에 바꿔도 옛 데이터를 옮긴 결과가 달라지면 안 되기 때문이다.
+ */
+const V4_COFFEE_CONFIG: GroupConfig = {
+  presetId: 'coffee',
+  actionLabel: '샀어요',
+  fairness: 'money',
+  orders: true,
+  memoPlaceholder: '예) 아아 6잔, 디저트 포함',
+  shareFormat: '☕',
+  themeId: 'coffee',
+}
+const V4_GENERAL_CONFIG: GroupConfig = {
+  presetId: 'custom',
+  actionLabel: '했어요',
+  fairness: 'count',
+  orders: false,
+  memoPlaceholder: '예) 간단한 메모',
+  shareFormat: '{emoji} {name}',
+  themeId: 'coffee',
+}
+
+/**
+ * v3 → v4: 그룹마다 요일(schedule)과 설정(config)을 채운다. 기존 그룹은 모두 평일.
+ * 커피 템플릿 → 커피 설정, 일반 템플릿 → 순번만 쓰는 기본 설정. 멤버·기록·휴가 등 다른 값은 그대로 둔다.
+ */
+function v3ToV4(d: Raw): Raw {
+  const groups = Array.isArray(d.groups) ? d.groups : []
+  return {
+    ...d,
+    schemaVersion: 4,
+    groups: groups.map((g) => {
+      if (!isObj(g)) return g
+      const { template, ...rest } = g
+      return {
+        ...rest,
+        schedule: 'weekdays',
+        config: template === 'coffee' ? { ...V4_COFFEE_CONFIG } : { ...V4_GENERAL_CONFIG },
+      }
+    }),
+  }
+}
+
+const STEPS: Record<number, (d: Raw, now: number) => Raw> = { 1: v1ToV2, 2: v2ToV3, 3: v3ToV4 }
 
 export function versionOf(input: unknown): number {
   return isObj(input) && typeof input.schemaVersion === 'number' ? input.schemaVersion : 1
@@ -238,10 +285,25 @@ function normalizeContent(d: Raw): Content {
   }
 }
 
+function readConfig(v: unknown): GroupConfig {
+  const c = isObj(v) ? v : {}
+  // 알 수 없는 값은 순번만 쓰는 기본 설정으로 (금액·주문 기능을 잘못 켜지 않도록)
+  const fairness = c.fairness === 'money' ? 'money' : 'count'
+  return {
+    presetId: str(c.presetId) ?? 'custom',
+    actionLabel: str(c.actionLabel) ?? '했어요',
+    fairness,
+    orders: fairness === 'money' && c.orders === true,
+    memoPlaceholder: str(c.memoPlaceholder) ?? '예) 간단한 메모',
+    shareFormat: str(c.shareFormat) ?? '{emoji} {name}',
+    themeId: (THEME_IDS as readonly unknown[]).includes(c.themeId) ? (c.themeId as ThemeId) : 'coffee',
+  }
+}
+
 function normalizeGroup(raw: unknown, usedIds: Set<string>): Group | null {
   if (!isObj(raw)) return null
-  // 알 수 없는 템플릿은 순번만 쓰는 일반으로 (커피 전용 기능을 잘못 켜지 않도록)
-  const template: Template = raw.template === 'coffee' ? 'coffee' : 'general'
+  const config = readConfig(raw.config)
+  const money = config.fairness === 'money'
   const id = typeof raw.id === 'string' && raw.id && !usedIds.has(raw.id) ? raw.id : uid()
   usedIds.add(id)
   const coffee = isObj(raw.coffee) ? raw.coffee : {}
@@ -254,14 +316,15 @@ function normalizeGroup(raw: unknown, usedIds: Set<string>): Group | null {
   })
   return {
     id,
-    name: str(raw.name) ?? TEMPLATE_INFO[template].defaultName,
-    template,
-    emoji: typeof raw.emoji === 'string' && raw.emoji ? raw.emoji : TEMPLATE_INFO[template].emoji,
+    name: str(raw.name) ?? '그룹',
+    emoji: typeof raw.emoji === 'string' && raw.emoji ? raw.emoji : '✨',
+    config,
+    schedule: normalizeSchedule(raw.schedule),
     members: c.members,
     records: c.purchases,
     absences: c.absences,
     skipDays: c.skipDays,
-    ...(template === 'coffee'
+    ...(money
       ? { coffee: { orders: c.orders, customMenus: c.customMenus, priceList: c.priceList, settings: c.settings } }
       : {}),
   }

@@ -1,10 +1,10 @@
 import { SCHEMA_VERSION, type AppData } from '../types'
-import { COFFEE_GROUP_ID, newGroup, TEMPLATE_INFO } from '../logic/groups'
+import { defaultCoffeeGroup } from '../logic/groups'
 import { FutureVersionError, migrate, serialize, versionOf } from './migrate'
 
 export const EMPTY_DATA: AppData = {
   schemaVersion: SCHEMA_VERSION,
-  groups: [newGroup(COFFEE_GROUP_ID, 'coffee', TEMPLATE_INFO.coffee.defaultName, TEMPLATE_INFO.coffee.emoji)],
+  groups: [defaultCoffeeGroup()],
   updatedAt: 0,
 }
 
@@ -19,6 +19,7 @@ export const SHADOW_PREV_KEY = 'coffee-duty:shadow-prev' // "그대로 두기"�
 export const RESTORE_BACKUP_KEY = 'coffee-duty:backup-before-restore' // 되돌리기 직전의 메인 원본
 const BACKUP_V2_KEY = 'coffee-duty:backup-before-v2' // v1 → v2 마이그레이션 직전 원본
 const BACKUP_V3_KEY = 'coffee-duty:backup-before-v3' // v1/v2 → v3(그룹 도입) 마이그레이션 직전 원본
+const BACKUP_V4_KEY = 'coffee-duty:backup-before-v4' // v1~v3 → v4(요일·템플릿 설정) 마이그레이션 직전 원본
 export const ACTIVE_GROUP_KEY = 'coffee-duty:active-group' // 이 기기에서 보고 있는 그룹 (데이터가 아니라 기기별 화면 상태)
 const CORRUPT_KEY = 'coffee-duty:corrupt-backup' // 읽을 수 없던 저장값 원본
 
@@ -131,7 +132,8 @@ export async function loadInitialData(
     // 구버전을 처음 옮기는 순간에만, 원본을 한 번 따로 보관한다 (이미 있으면 덮어쓰지 않음)
     const from = versionOf(json)
     if (from < 2 && !read(storage, BACKUP_V2_KEY)) write(storage, BACKUP_V2_KEY, raw)
-    if (from < SCHEMA_VERSION && !read(storage, BACKUP_V3_KEY)) write(storage, BACKUP_V3_KEY, raw)
+    if (from < 3 && !read(storage, BACKUP_V3_KEY)) write(storage, BACKUP_V3_KEY, raw)
+    if (from < 4 && !read(storage, BACKUP_V4_KEY)) write(storage, BACKUP_V4_KEY, raw)
     const shadow = readShadow(storage)
     if (isOverwrittenByOldApp(json, shadow)) return { data, recovery: toRecovery(shadow!) }
     return { data }

@@ -1,18 +1,63 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "groups": [
     {
       "id": "g-coffee",
       "name": "커피",
-      "template": "coffee",
       "emoji": "☕",
+      "config": {
+        "presetId": "coffee",
+        "actionLabel": "샀어요",
+        "fairness": "money",
+        "orders": true,
+        "memoPlaceholder": "예) 아아 6잔, 디저트 포함",
+        "shareFormat": "☕",
+        "themeId": "coffee"
+      },
+      "schedule": "weekdays",
       "members": [
-        { "id": "m1", "name": "멤버 1", "order": 1, "color": "#C8553D", "emoji": "☕" },
-        { "id": "m2", "name": "멤버 2", "order": 2, "color": "#D9A93B", "emoji": "🥐" },
-        { "id": "m3", "name": "멤버 3", "order": 3, "color": "#7A8B4F", "emoji": "🐻" },
-        { "id": "m4", "name": "멤버 4", "order": 4, "color": "#5F86A6", "emoji": "🐱" },
-        { "id": "m5", "name": "멤버 5", "order": 5, "color": "#8E5572", "emoji": "🍩" },
-        { "id": "m6", "name": "멤버 6", "order": 6, "color": "#4F8A8B", "emoji": "🦊" }
+        {
+          "id": "m1",
+          "name": "멤버 1",
+          "order": 1,
+          "color": "#C8553D",
+          "emoji": "☕"
+        },
+        {
+          "id": "m2",
+          "name": "멤버 2",
+          "order": 2,
+          "color": "#D9A93B",
+          "emoji": "🥐"
+        },
+        {
+          "id": "m3",
+          "name": "멤버 3",
+          "order": 3,
+          "color": "#7A8B4F",
+          "emoji": "🐻"
+        },
+        {
+          "id": "m4",
+          "name": "멤버 4",
+          "order": 4,
+          "color": "#5F86A6",
+          "emoji": "🐱"
+        },
+        {
+          "id": "m5",
+          "name": "멤버 5",
+          "order": 5,
+          "color": "#8E5572",
+          "emoji": "🍩"
+        },
+        {
+          "id": "m6",
+          "name": "멤버 6",
+          "order": 6,
+          "color": "#4F8A8B",
+          "emoji": "🦊"
+        }
       ],
       "records": [],
       "absences": [],
@@ -21,7 +66,10 @@
         "orders": [],
         "customMenus": [],
         "priceList": [],
-        "settings": { "buyerRule": "count", "defaultPriceMode": "none" }
+        "settings": {
+          "buyerRule": "count",
+          "defaultPriceMode": "none"
+        }
       }
     }
   ],

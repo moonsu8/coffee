@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, OrderItem, Purchase, Settings, Template } from '../types'
+import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, OrderItem, Purchase, Schedule, Settings, GroupConfig } from '../types'
 import { applyRecovery, EMPTY_DATA, loadInitialData, parseAppData, readActiveGroup, restoreLastGood as restoreShadow, saveData, writeActiveGroup, type Recovery } from '../lib/data'
 import { formatSavedAt } from '../lib/format'
 import { Button } from '../components/ui/button'
@@ -11,8 +11,7 @@ import {
   groupToView,
   newGroup,
   planAbsenceAll,
-  TEMPLATE_INFO,
-  TERMS,
+  termsOf,
   updateGroupView,
   withAbsencesAdded,
   withAbsencesRemoved,
@@ -36,8 +35,8 @@ interface Store {
   terms: Terms
   switchGroup: (id: string) => void
   /** 새 그룹을 만들고 그 그룹으로 이동. 새 id를 반환 */
-  addGroup: (g: { name: string; emoji: string; template: Template }) => string
-  updateGroup: (id: string, patch: { name?: string; emoji?: string }) => void
+  addGroup: (g: { name: string; emoji: string; config: GroupConfig; schedule: Schedule; memberNames?: string[] }) => string
+  updateGroup: (id: string, patch: { name?: string; emoji?: string; schedule?: Schedule }) => void
   /** 그룹 삭제(마지막 하나는 삭제 불가 → null). 되돌리기 함수를 반환 */
   removeGroup: (id: string) => (() => void) | null
   /** 현재 그룹의 휴가를, 이름이 같은 멤버가 있는 모든 그룹에 등록 */
@@ -150,15 +149,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       root,
       today,
       groups: root.groups,
-      terms: TERMS[group.template],
+      terms: termsOf(group.config),
       switchGroup: (id) => {
         if (!rootRef.current.groups.some((g) => g.id === id)) return
         setActiveId(id)
         writeActiveGroup(id)
       },
-      addGroup: ({ name, emoji, template }) => {
+      addGroup: ({ name, emoji, config, schedule, memberNames }) => {
         const id = uid()
-        const g = newGroup(id, template, name.trim() || TEMPLATE_INFO[template].defaultName, emoji)
+        const members: Member[] = []
+        for (const n of memberNames ?? []) {
+          const nm = n.trim()
+          if (!nm) continue
+          const style = suggestStyle(members)
+          members.push({ id: uid(), name: nm, order: members.length + 1, color: style.color, emoji: style.emoji })
+        }
+        const g = newGroup(id, { name: name.trim() || '그룹', emoji, config, schedule, members })
         setRoot((r) => withGroupAdded(r, g))
         setActiveId(id)
         writeActiveGroup(id)

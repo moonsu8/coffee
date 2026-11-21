@@ -206,7 +206,7 @@ export function AbsencesScreen() {
 
         <Card>
           <SectionTitle>쉬는 날 (공휴일·회식 등)</SectionTitle>
-          <p className="mb-3 text-sm text-ink-2">여기에 넣은 날은 당번 계산에서 빠져요. 주말은 자동으로 제외돼요.</p>
+          <p className="mb-3 text-sm text-ink-2">여기에 넣은 날은 당번 계산에서 빠져요. {data.schedule === 'weekdays' ? '주말은' : '담당 요일이 아닌 날은'} 자동으로 제외돼요.</p>
           <div className="flex gap-2">
             <input
               type="date"

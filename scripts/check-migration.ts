@@ -1,11 +1,12 @@
 /**
- * 일회성 검증: backup/*.json (총무 폰에서 내보낸 실제 데이터)을 최신 구조(v3)로 마이그레이션하고,
+ * 일회성 검증: backup/*.json (총무 폰에서 내보낸 실제 데이터)을 최신 구조(v4)로 마이그레이션하고,
  * 멤버·기록(구매)·휴가·쉬는 날·주문·금액·가격표·설정이 개수와 값까지 그대로인지 확인한다.
  *
  *   npm run check:migration
  *
  * - v1/v2 파일: 전부 "커피" 그룹 하나로 옮겨졌는지(값 비교)
- * - v3 파일: 그룹마다 왕복(읽기→저장→읽기) 결과가 원본과 같은지
+ * - v3 파일: 그룹마다 값이 그대로이고, 모든 그룹이 평일(weekdays) + 템플릿에 맞는 설정을 받았는지
+ * - v4 파일: 그룹마다 왕복(읽기→저장→읽기) 결과가 원본과 같은지(요일·설정 포함)
  * - 원본 파일은 읽기만 한다 (수정하지 않음)
  * - 실명·메모 등 내용은 출력하지 않는다. 개수와 일치 여부만 출력한다
  */
@@ -137,7 +138,7 @@ function check(file: string): { sections: { title: string; rows: Row[] }[]; extr
   const expect = (label: string, ok: boolean) => extra.push(`${ok ? '✓' : '✗'} ${label}`)
   const sections: { title: string; rows: Row[] }[] = []
 
-  expect(`schemaVersion ${version} → ${out.schemaVersion}`, out.schemaVersion === 3)
+  expect(`schemaVersion ${version} → ${out.schemaVersion}`, out.schemaVersion === 4)
 
   if (version < 3) {
     // v1/v2 → 전부 "커피" 그룹 하나
@@ -151,7 +152,7 @@ function check(file: string): { sections: { title: string; rows: Row[] }[]; extr
       priceList: arr(json.priceList),
     }
     const g = out.groups[0]
-    expect('그룹 1개, 템플릿 커피 (기존 데이터 전부가 한 그룹으로)', out.groups.length === 1 && g.template === 'coffee')
+    expect('그룹 1개, 템플릿 커피 (기존 데이터 전부가 한 그룹으로)', out.groups.length === 1 && g.config.presetId === 'coffee' && g.config.fairness === 'money' && g.schedule === 'weekdays')
     sections.push({ title: '커피 그룹', rows: rowsFor(raw, g) })
 
     const s = (json.settings ?? null) as R | null
@@ -170,8 +171,18 @@ function check(file: string): { sections: { title: string; rows: Row[] }[]; extr
       const og = out.groups[i]
       if (!og) return
       const c = (rg.coffee ?? {}) as R
+      if (version === 3) {
+        // v3 → v4: 모두 평일, 템플릿에 맞는 설정, template 필드 제거
+        const wasCoffee = rg.template === 'coffee'
+        expect(
+          `그룹 ${i + 1}: 평일 + ${wasCoffee ? '커피' : '순번'} 설정`,
+          og.schedule === 'weekdays' && (wasCoffee ? og.config.presetId === 'coffee' && og.config.fairness === 'money' : og.config.fairness === 'count' && !og.coffee),
+        )
+      } else {
+        expect(`그룹 ${i + 1}: 요일·설정이 값 그대로`, j(og.schedule) === j(rg.schedule) && j(og.config) === j(rg.config))
+      }
       sections.push({
-        title: `그룹 ${i + 1} (${og.template === 'coffee' ? '커피' : '일반'})`,
+        title: `그룹 ${i + 1} (${og.config.fairness === 'money' ? '금액' : '횟수'})`,
         rows: rowsFor(
           {
             members: arr(rg.members),

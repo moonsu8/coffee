@@ -1,5 +1,6 @@
-import type { Absence, BuyerRule, DateStr, Member, Purchase } from '../types'
-import { addDays, isWeekend } from './dates'
+import type { Absence, BuyerRule, DateStr, Member, Purchase, Schedule } from '../types'
+import { addDays } from './dates'
+import { isScheduledDay } from './schedule'
 import { balanceWindow, balancesOf, computeFairness, isValidPricing } from './fairness'
 
 export interface BuyerContext {
@@ -7,6 +8,8 @@ export interface BuyerContext {
   purchases: Purchase[]
   absences: Absence[]
   skipDays: DateStr[]
+  /** 담당하는 요일. 없으면 평일(기존 동작) */
+  schedule?: Schedule
   /** 없으면 횟수 기준(기존 동작). 'balance'면 차액이 가장 작은 사람이 먼저 */
   settings?: { buyerRule: BuyerRule; balanceSince?: DateStr }
   /** 예상 순번 시뮬레이션용: 가상으로 산 사람을 뒤로 보내는 보정값 (직접 넘기지 않는다) */
@@ -35,9 +38,9 @@ export interface ForecastDay {
   actual: boolean // 이미 구매 기록이 있는 날
 }
 
-/** 주말·skipDays가 아닌 날 */
-export function isBusinessDay(date: DateStr, skipDays: DateStr[]): boolean {
-  return !isWeekend(date) && !skipDays.includes(date)
+/** 담당 요일(기본 평일)이고 skipDays가 아닌 날 */
+export function isBusinessDay(date: DateStr, skipDays: DateStr[], schedule?: Schedule): boolean {
+  return isScheduledDay(date, schedule) && !skipDays.includes(date)
 }
 
 export function isAbsent(memberId: string, date: DateStr, absences: Absence[]): boolean {
@@ -83,14 +86,14 @@ export function rankMembers(date: DateStr, ctx: BuyerContext): RankedMember[] {
 
 /** 특정 날짜의 당번. 영업일이 아니거나 후보가 없으면 null (기록 유무와 무관한 '계산값') */
 export function getNextBuyer(date: DateStr, ctx: BuyerContext): Member | null {
-  if (!isBusinessDay(date, ctx.skipDays)) return null
+  if (!isBusinessDay(date, ctx.skipDays, ctx.schedule)) return null
   return rankMembers(date, ctx).find((r) => !r.absent)?.member ?? null
 }
 
 /** date 이후(포함) 첫 영업일 */
-export function nextBusinessDay(date: DateStr, skipDays: DateStr[]): DateStr {
+export function nextBusinessDay(date: DateStr, skipDays: DateStr[], schedule?: Schedule): DateStr {
   let d = date
-  for (let i = 0; i < 400 && !isBusinessDay(d, skipDays); i++) d = addDays(d, 1)
+  for (let i = 0; i < 400 && !isBusinessDay(d, skipDays, schedule); i++) d = addDays(d, 1)
   return d
 }
 
@@ -111,7 +114,7 @@ export function forecastBuyers(from: DateStr, count: number, ctx: BuyerContext):
     const max = Math.max(0, ...ctx.members.map((m) => eff.get(m.id) ?? 0))
     bias.set(id, (bias.get(id) ?? 0) + (max - (eff.get(id) ?? 0)) + 1)
   }
-  let date = nextBusinessDay(from, ctx.skipDays)
+  let date = nextBusinessDay(from, ctx.skipDays, ctx.schedule)
   while (result.length < count) {
     const recorded = ctx.purchases.find((p) => p.date === date)
     if (recorded) {
@@ -126,7 +129,7 @@ export function forecastBuyers(from: DateStr, count: number, ctx: BuyerContext):
         if (balanceMode) pushBack(date, buyer.id)
       }
     }
-    date = nextBusinessDay(addDays(date, 1), ctx.skipDays)
+    date = nextBusinessDay(addDays(date, 1), ctx.skipDays, ctx.schedule)
   }
   return result
 }

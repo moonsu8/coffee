@@ -39,7 +39,7 @@ function relativeDays(from: string, to: string): string {
 
 export function HomeScreen({ goSettings }: { goSettings: () => void }) {
   const { data, terms, today, memberById, savePurchase, removePurchase, savePrices } = useStore()
-  const isCoffee = data.template === 'coffee'
+  const isMoney = data.template === 'coffee'
   const toast = useToast()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [priceFor, setPriceFor] = useState<{ memberId: string; fromButton: boolean } | null>(null)
@@ -60,13 +60,13 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
     )
   }
 
-  const target = nextBusinessDay(today, data.skipDays)
+  const target = nextBusinessDay(today, data.skipDays, data.schedule)
   const isToday = target === today
   const todayPurchase = isToday ? data.purchases.find((p) => p.date === today) : undefined
   const buyer = todayPurchase ? memberById(todayPurchase.memberId) : getNextBuyer(target, data)
   const done = !!todayPurchase
 
-  const queueDate = done ? nextBusinessDay(addDays(today, 1), data.skipDays) : target
+  const queueDate = done ? nextBusinessDay(addDays(today, 1), data.skipDays, data.schedule) : target
   const queue = rankMembers(queueDate, data)
     .filter((r) => r.member.id !== buyer?.id)
     .slice(0, 3)
@@ -90,7 +90,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
       // 이미 기록된 날의 구매자 변경: 금액 기록은 그대로 두고 결제자만 바꾼다
       const undo = savePurchase({ ...todayPurchase, memberId })
       toast({ message: `${memberById(memberId)?.name ?? ''}님으로 바꿨어요`, actionLabel: '되돌리기', onAction: undo })
-    } else if (isCoffee && needsPriceSheet(data.settings)) setPriceFor({ memberId, fromButton })
+    } else if (isMoney && needsPriceSheet(data.settings)) setPriceFor({ memberId, fromButton })
     else record(memberId, fromButton)
   }
 
@@ -231,11 +231,11 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
         </div>
       </motion.section>
 
-      {isToday && isCoffee && <OrderCard date={today} />}
+      {isToday && data.hasOrders && <OrderCard date={today} />}
 
       {/* ───── 앞으로 5영업일 ───── */}
       <Card className="mt-5">
-        <SectionTitle>앞으로 5영업일</SectionTitle>
+        <SectionTitle>{data.schedule === 'weekdays' ? '앞으로 5영업일' : '앞으로 5번'}</SectionTitle>
         <ul className="divide-y divide-line">
           {forecast.map((f, i) => {
             const m = f.memberId ? memberById(f.memberId) : undefined

@@ -1,13 +1,18 @@
 import { Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { GROUP_EMOJIS, TEMPLATE_INFO } from '@/logic/groups'
+import { GROUP_EMOJIS } from '@/logic/groups'
+import { scheduleDays, scheduleLabel, WEEKDAY_NUMS } from '@/logic/schedule'
+import { WEEKDAYS_KO } from '@/logic/dates'
+import { configOf, CUSTOM_PRESET_ID, PRESETS, presetById, THEME_LABELS, type TemplatePreset } from '@/logic/templates'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/store'
-import type { Group, Template } from '@/types'
+import { THEME_IDS, type Group, type Schedule, type ThemeId } from '@/types'
 import { Card, SectionTitle } from './common'
 import { useToast } from './toast'
 import { Button } from './ui/button'
 import { Sheet, SheetFooter } from './ui/sheet'
+
+const presetLabel = (g: Group) => (g.config.presetId === CUSTOM_PRESET_ID ? '직접 만들기' : presetById(g.config.presetId).name)
 
 /** 그룹 관리: 추가 · 이름/이모지 변경 · 삭제 (마지막 하나는 삭제할 수 없다) */
 export function GroupsCard() {
@@ -46,7 +51,7 @@ export function GroupsCard() {
                 <span className="min-w-0">
                   <span className="block truncate text-[16px] font-semibold">{g.name}</span>
                   <span className="block text-xs text-ink-2">
-                    {TEMPLATE_INFO[g.template].label} · 멤버 {g.members.length}명 · 기록 {g.records.length}건
+                    {presetLabel(g)} · {scheduleLabel(g.schedule)} · 멤버 {g.members.length}명 · 기록 {g.records.length}건
                   </span>
                 </span>
               </button>
@@ -66,7 +71,7 @@ export function GroupsCard() {
         open={form !== null}
         onOpenChange={(o) => !o && setForm(null)}
         title={form?.mode === 'edit' ? '그룹 수정' : '그룹 추가'}
-        description={form?.mode === 'edit' ? undefined : '멤버·기록·휴가는 그룹마다 따로 관리돼요'}
+        description={form?.mode === 'edit' ? undefined : '무엇을 돌아가며 할까요? 멤버·기록·휴가는 그룹마다 따로 관리돼요'}
       >
         {form && (
           <GroupForm
@@ -75,7 +80,7 @@ export function GroupsCard() {
             canDelete={groups.length > 1}
             onClose={() => setForm(null)}
             onSubmit={(v) => {
-              if (form.mode === 'edit') updateGroup(form.group.id, { name: v.name, emoji: v.emoji })
+              if (form.mode === 'edit') updateGroup(form.group.id, { name: v.name, emoji: v.emoji, schedule: v.schedule })
               else addGroup(v)
               toast({
                 message: form.mode === 'edit' ? '그룹을 고쳤어요' : `${v.emoji} ${v.name} 그룹을 만들었어요`,
@@ -119,6 +124,70 @@ export function GroupsCard() {
   )
 }
 
+/* ───────── 요일 선택 ───────── */
+
+function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Schedule) => void }) {
+  const days = scheduleDays(value)
+  const toggle = (d: number) => {
+    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d]
+    if (next.length === 0) return // 최소 하루는 있어야 한다
+    const sorted = [...next].sort((a, b) => a - b)
+    if (sorted.join() === '1,2,3,4,5') onChange('weekdays')
+    else if (sorted.length === 7) onChange('daily')
+    else onChange(sorted)
+  }
+  const quick = (label: string, v: Schedule) => (
+    <button
+      type="button"
+      onClick={() => onChange(v)}
+      aria-pressed={scheduleLabel(value) === label}
+      className={cn(
+        'min-h-9 rounded-full px-3 text-[13px] font-bold',
+        scheduleLabel(value) === label ? 'bg-caramel text-on-caramel' : 'bg-surface-2 text-ink-2',
+      )}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-sm font-semibold text-ink-2">담당하는 요일</p>
+        <div className="flex gap-1.5">
+          {quick('평일', 'weekdays')}
+          {quick('매일', 'daily')}
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1" role="group" aria-label="요일">
+        {WEEKDAY_NUMS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            aria-pressed={days.includes(d)}
+            onClick={() => toggle(d)}
+            className={cn(
+              'grid min-h-11 place-items-center rounded-xl text-[15px] font-bold',
+              days.includes(d) ? 'bg-caramel text-on-caramel' : 'bg-surface-2 text-ink-2',
+            )}
+          >
+            {WEEKDAYS_KO[d]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ───────── 그룹 추가(템플릿 고르기 → 이름·멤버) / 수정 ───────── */
+
+interface FormValue {
+  name: string
+  emoji: string
+  schedule: Schedule
+  config: Group['config']
+  memberNames: string[]
+}
+
 function GroupForm({
   form,
   canDelete,
@@ -129,43 +198,100 @@ function GroupForm({
   form: { mode: 'add' } | { mode: 'edit'; group: Group }
   canDelete: boolean
   onClose: () => void
-  onSubmit: (v: { name: string; emoji: string; template: Template }) => void
+  onSubmit: (v: FormValue) => void
   onDelete: () => void
 }) {
   const editing = form.mode === 'edit' ? form.group : null
-  const [template, setTemplate] = useState<Template>(editing?.template ?? 'general')
+  const [preset, setPreset] = useState<TemplatePreset | null>(null)
+
+  if (!editing && !preset) {
+    return (
+      <div className="pb-4">
+        <div className="grid grid-cols-2 gap-2" role="list" aria-label="템플릿">
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              role="listitem"
+              onClick={() => setPreset(p)}
+              className="flex min-h-[104px] flex-col items-start gap-1 rounded-2xl border-2 border-transparent bg-surface-2 p-3 text-left transition-colors active:border-caramel"
+            >
+              <span className="text-2xl">{p.emoji}</span>
+              <span className="text-[15px] font-bold">{p.id === CUSTOM_PRESET_ID ? '직접 만들기' : p.name}</span>
+              <span className="text-xs leading-snug text-ink-2">{p.blurb}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <GroupFields
+      editing={editing}
+      preset={preset}
+      onBack={() => setPreset(null)}
+      canDelete={canDelete}
+      onClose={onClose}
+      onSubmit={onSubmit}
+      onDelete={onDelete}
+    />
+  )
+}
+
+function GroupFields({
+  editing,
+  preset,
+  onBack,
+  canDelete,
+  onClose,
+  onSubmit,
+  onDelete,
+}: {
+  editing: Group | null
+  preset: TemplatePreset | null
+  onBack: () => void
+  canDelete: boolean
+  onClose: () => void
+  onSubmit: (v: FormValue) => void
+  onDelete: () => void
+}) {
+  const p = preset ?? presetById(CUSTOM_PRESET_ID)
+  const custom = !editing && p.id === CUSTOM_PRESET_ID
   const [name, setName] = useState(editing?.name ?? '')
-  const [emoji, setEmoji] = useState(editing?.emoji ?? TEMPLATE_INFO.general.emoji)
-  const [emojiTouched, setEmojiTouched] = useState(!!editing)
-  const placeholder = TEMPLATE_INFO[template].defaultName
+  const [emoji, setEmoji] = useState(editing?.emoji ?? p.emoji)
+  const [schedule, setSchedule] = useState<Schedule>(editing?.schedule ?? p.schedule)
+  const [members, setMembers] = useState('')
+  const [action, setAction] = useState(p.actionLabel)
+  const [money, setMoney] = useState(p.fairness === 'money')
+  const [themeId, setThemeId] = useState<ThemeId>(p.themeId)
+
+  const submit = () => {
+    const config = editing
+      ? editing.config
+      : configOf({
+          ...p,
+          actionLabel: custom ? action.trim() || p.actionLabel : p.actionLabel,
+          fairness: custom ? (money ? 'money' : 'count') : p.fairness,
+          orders: custom ? false : p.orders, // 직접 만들기에는 주문(커피 메뉴) 기능이 없다
+          themeId: custom ? themeId : p.themeId,
+        })
+    onSubmit({
+      name: name.trim() || p.name,
+      emoji,
+      schedule,
+      config,
+      memberNames: members
+        .split(/[\n,]/)
+        .map((x) => x.trim())
+        .filter(Boolean),
+    })
+  }
 
   return (
     <div className="space-y-5 pb-2">
       {!editing && (
-        <div>
-          <p className="mb-2 text-sm font-semibold text-ink-2">템플릿</p>
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="템플릿">
-            {(['general', 'coffee'] as Template[]).map((t) => (
-              <button
-                key={t}
-                role="radio"
-                aria-checked={template === t}
-                onClick={() => {
-                  setTemplate(t)
-                  if (!emojiTouched) setEmoji(TEMPLATE_INFO[t].emoji)
-                }}
-                className={cn(
-                  'flex min-h-[96px] flex-col items-start gap-1 rounded-2xl border-2 p-3 text-left transition-colors',
-                  template === t ? 'border-caramel bg-caramel/15' : 'border-transparent bg-surface-2',
-                )}
-              >
-                <span className="text-2xl">{TEMPLATE_INFO[t].emoji}</span>
-                <span className="text-[15px] font-bold">{TEMPLATE_INFO[t].label}</span>
-                <span className="text-xs leading-snug text-ink-2">{TEMPLATE_INFO[t].blurb}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <button type="button" onClick={onBack} className="-mt-1 min-h-9 text-[13px] font-semibold text-ink-2">
+          ← 템플릿 다시 고르기 ({p.emoji} {p.id === CUSTOM_PRESET_ID ? '직접 만들기' : p.name})
+        </button>
       )}
       <div>
         <label htmlFor="g-name" className="mb-2 block text-sm font-semibold text-ink-2">
@@ -176,33 +302,107 @@ function GroupForm({
           value={name}
           maxLength={10}
           onChange={(e) => setName(e.target.value)}
-          placeholder={`예) ${placeholder}`}
+          placeholder={`예) ${p.name}`}
           className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base font-semibold placeholder:font-normal placeholder:text-ink-2/70"
         />
       </div>
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink-2">이모지</p>
-        <div className="grid grid-cols-6 gap-1" role="radiogroup" aria-label="그룹 이모지">
-          {GROUP_EMOJIS.map((e) => (
-            <button
-              key={e}
-              role="radio"
-              aria-checked={emoji === e}
-              aria-label={e}
-              onClick={() => {
-                setEmoji(e)
-                setEmojiTouched(true)
-              }}
-              className={cn(
-                'grid min-h-11 place-items-center rounded-xl text-[22px]',
-                emoji === e ? 'bg-caramel/30 ring-2 ring-caramel' : 'hover:bg-surface-2',
-              )}
-            >
-              {e}
-            </button>
-          ))}
+      {!editing && (
+        <div>
+          <label htmlFor="g-members" className="mb-2 block text-sm font-semibold text-ink-2">
+            멤버 (선택)
+          </label>
+          <textarea
+            id="g-members"
+            value={members}
+            rows={2}
+            onChange={(e) => setMembers(e.target.value)}
+            placeholder="이름을 쉼표나 줄바꿈으로 구분해요. 나중에 설정에서도 추가할 수 있어요"
+            className="w-full resize-none rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base placeholder:text-[14px] placeholder:text-ink-2/70"
+          />
         </div>
-      </div>
+      )}
+      <ScheduleField value={schedule} onChange={setSchedule} />
+      {(editing || custom) && (
+        <div>
+          <p className="mb-2 text-sm font-semibold text-ink-2">이모지</p>
+          <div className="grid grid-cols-6 gap-1" role="radiogroup" aria-label="그룹 이모지">
+            {GROUP_EMOJIS.map((e) => (
+              <button
+                key={e}
+                role="radio"
+                aria-checked={emoji === e}
+                aria-label={e}
+                onClick={() => setEmoji(e)}
+                className={cn(
+                  'grid min-h-11 place-items-center rounded-xl text-[22px]',
+                  emoji === e ? 'bg-caramel/30 ring-2 ring-caramel' : 'hover:bg-surface-2',
+                )}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {custom && (
+        <>
+          <div>
+            <label htmlFor="g-action" className="mb-2 block text-sm font-semibold text-ink-2">
+              완료 버튼 문구
+            </label>
+            <input
+              id="g-action"
+              value={action}
+              maxLength={8}
+              onChange={(e) => setAction(e.target.value)}
+              placeholder="예) 했어요"
+              className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base font-semibold placeholder:font-normal placeholder:text-ink-2/70"
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-semibold text-ink-2">공평함 기준</p>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="공평함 기준">
+              {[
+                { v: false, t: '횟수', d: '많이 안 한 사람이 먼저' },
+                { v: true, t: '금액', d: '낸 돈·차액까지 계산' },
+              ].map((o) => (
+                <button
+                  key={o.t}
+                  role="radio"
+                  aria-checked={money === o.v}
+                  onClick={() => setMoney(o.v)}
+                  className={cn(
+                    'flex min-h-[72px] flex-col items-start gap-0.5 rounded-2xl border-2 p-3 text-left',
+                    money === o.v ? 'border-caramel bg-caramel/15' : 'border-transparent bg-surface-2',
+                  )}
+                >
+                  <span className="text-[15px] font-bold">{o.t}</span>
+                  <span className="text-xs text-ink-2">{o.d}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-semibold text-ink-2">테마</p>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="테마">
+              {THEME_IDS.map((t) => (
+                <button
+                  key={t}
+                  role="radio"
+                  aria-checked={themeId === t}
+                  onClick={() => setThemeId(t)}
+                  className={cn(
+                    'min-h-10 rounded-full px-3.5 text-sm font-semibold',
+                    themeId === t ? 'bg-caramel text-on-caramel' : 'bg-surface-2 text-ink-2',
+                  )}
+                >
+                  {THEME_LABELS[t].emoji} {THEME_LABELS[t].label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
       <SheetFooter className="flex gap-2">
         {editing && (
           <Button variant="danger" size="lg" disabled={!canDelete} onClick={onDelete}>
@@ -212,16 +412,12 @@ function GroupForm({
         <Button variant="soft" size="lg" onClick={onClose}>
           취소
         </Button>
-        <Button
-          size="lg"
-          className="flex-1"
-          disabled={!!editing && !name.trim()}
-          onClick={() => onSubmit({ name: name.trim() || placeholder, emoji, template })}
-        >
+        <Button size="lg" className="flex-1" disabled={!!editing && !name.trim()} onClick={submit}>
           {editing ? '저장' : '추가하기'}
         </Button>
       </SheetFooter>
       {editing && !canDelete && <p className="-mt-2 text-[13px] text-ink-2">마지막 그룹은 삭제할 수 없어요.</p>}
+      {editing && <p className="-mt-2 text-[12px] text-ink-2">종류와 버튼 문구는 만든 뒤 바꿀 수 없어요.</p>}
     </div>
   )
 }

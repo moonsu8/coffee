@@ -1,4 +1,5 @@
-import { groupToView } from '../logic/groups'
+import { groupToView, newGroup } from '../logic/groups'
+import { configOf, presetById } from '../logic/templates'
 import { migrate } from './migrate'
 
 /**
@@ -8,4 +9,10 @@ import { migrate } from './migrate'
 export function migrateView(input: unknown, now?: number) {
   const root = migrate(input, now)
   return { ...groupToView(root.groups[0]), schemaVersion: root.schemaVersion, updatedAt: root.updatedAt }
+}
+
+/** 테스트 전용: v3 시절의 newGroup(id, 'coffee'|'general', name, emoji)과 같은 그룹을 만든다 */
+export function legacyGroup(id: string, template: 'coffee' | 'general', name: string, emoji: string) {
+  const p = presetById(template === 'coffee' ? 'coffee' : 'custom')
+  return newGroup(id, { name, emoji, config: configOf(p), schedule: 'weekdays' })
 }
