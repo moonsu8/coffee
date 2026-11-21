@@ -22,7 +22,7 @@ import type { DateStr, Pricing } from '@/types'
 type View = 'calendar' | 'list'
 
 export function HistoryScreen() {
-  const { data, today, memberById, removePurchase } = useStore()
+  const { data, terms, today, memberById, removePurchase } = useStore()
   const toast = useToast()
   const [view, setView] = useState<View>('calendar')
   const [month, setMonth] = useState(monthKey(today))
@@ -70,7 +70,7 @@ export function HistoryScreen() {
                   onSelect={setEditing}
                   dayLabel={(d) => {
                     const p = byDate.get(d)
-                    return `${formatShort(d)} ${p ? memberById(p.memberId)?.name + ' 구매' : '기록 없음'}`
+                    return `${formatShort(d)} ${p ? memberById(p.memberId)?.name + terms.calSuffix : '기록 없음'}`
                   }}
                   dayClassName={(d) => (!isBusinessDay(d, data.skipDays) ? 'opacity-60' : '')}
                   renderDay={(d) => {
@@ -94,7 +94,7 @@ export function HistoryScreen() {
                 </ul>
               )}
               {monthPurchases.length === 0 && (
-                <p className="mt-4 text-center text-sm text-ink-2">날짜를 누르면 그날의 구매 기록을 남길 수 있어요</p>
+                <p className="mt-4 text-center text-sm text-ink-2">{terms.calHint}</p>
               )}
             </motion.div>
           ) : (
@@ -104,7 +104,7 @@ export function HistoryScreen() {
                   <EmptyState
                     illustration={<EmptyCup />}
                     title="이 달엔 아직 기록이 없어요"
-                    body="첫 커피를 기록하면 여기에 차곡차곡 쌓여요."
+                    body={terms.emptyHistory}
                     action={<Button onClick={() => setEditing(today)}>오늘 기록하기</Button>}
                   />
                 </Card>
@@ -129,7 +129,7 @@ export function HistoryScreen() {
                               </div>
                             </div>
                           </SwipeRow>
-                          {day && <OrderHistory day={day} />}
+                          {day && data.template === 'coffee' && <OrderHistory day={day} />}
                         </li>
                       )
                     })}
@@ -149,14 +149,14 @@ export function HistoryScreen() {
 
 /** 구매 기록 등록/수정/삭제 시트 (과거 날짜도 가능) */
 function PurchaseEditor({ date, onClose }: { date: DateStr | null; onClose: () => void }) {
-  const { data, today, savePurchase, removePurchase } = useStore()
+  const { data, terms, today, savePurchase, removePurchase } = useStore()
   const toast = useToast()
   // 닫히는 애니메이션 동안에도 내용이 유지되도록 마지막 날짜를 기억 (시트가 언마운트되면 폼 상태는 자동 초기화)
   const last = useRef<DateStr>(date ?? today)
   if (date) last.current = date
   const shown = last.current
   return (
-    <Sheet open={!!date} onOpenChange={(o) => !o && onClose()} title={data.purchases.some((p) => p.date === shown) ? '구매 기록 수정' : '구매 기록 추가'}>
+    <Sheet open={!!date} onOpenChange={(o) => !o && onClose()} title={data.purchases.some((p) => p.date === shown) ? `${terms.recordNoun} 수정` : `${terms.recordNoun} 추가`}>
       <EditorBody initialDate={shown} onClose={onClose} save={savePurchase} remove={removePurchase} toast={toast} />
     </Sheet>
   )
@@ -175,7 +175,7 @@ function EditorBody({
   remove: ReturnType<typeof useStore>['removePurchase']
   toast: ReturnType<typeof useToast>
 }) {
-  const { data, today, savePrices } = useStore()
+  const { data, terms, today, savePrices } = useStore()
   const existing = data.purchases.find((p) => p.date === initialDate)
   const [date, setDate] = useState(initialDate)
   const [memberId, setMemberId] = useState<string | null>(existing?.memberId ?? null)
@@ -209,7 +209,8 @@ function EditorBody({
   if (setup.date !== date) setSetup({ date, ...pricingSetup(date) })
   const { lines, form } = setup
   const built = buildPricing(form, lines)
-  const pricing: Pricing | undefined = form.mode === 'none' ? undefined : built.pricing
+  // 금액은 커피 그룹에서만 다룬다
+  const pricing: Pricing | undefined = data.template === 'coffee' && form.mode !== 'none' ? built.pricing : undefined
 
   const doSave = () => {
     if (!memberId) return
@@ -245,7 +246,7 @@ function EditorBody({
         {clash && <p className="mt-1.5 text-[13px] text-caramel-ink">이 날은 이미 기록이 있어요. 저장하면 덮어써요.</p>}
       </div>
       <div>
-        <p className="mb-2 text-sm font-semibold text-ink-2">누가 샀나요?</p>
+        <p className="mb-2 text-sm font-semibold text-ink-2">{terms.whoField}</p>
         <MemberPicker members={data.members} value={memberId} onChange={setMemberId} />
       </div>
       <div>
@@ -261,16 +262,18 @@ function EditorBody({
           className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
         />
       </div>
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink-2">금액 (선택)</p>
-        <PricingFields
-          form={form}
-          onChange={(f) => setSetup({ ...setup, form: f })}
-          lines={lines}
-          idPrefix="edit"
-          allowNone
-        />
-      </div>
+      {data.template === 'coffee' && (
+        <div>
+          <p className="mb-2 text-sm font-semibold text-ink-2">금액 (선택)</p>
+          <PricingFields
+            form={form}
+            onChange={(f) => setSetup({ ...setup, form: f })}
+            lines={lines}
+            idPrefix="edit"
+            allowNone
+          />
+        </div>
+      )}
       <div className="flex gap-2 pt-1">
         {existing && (
           <Button

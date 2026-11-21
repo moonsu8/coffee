@@ -1,18 +1,51 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AppData, DateStr, DayOrder, Member, Order, OrderItem, Purchase, Settings } from '../types'
-import { applyRecovery, EMPTY_DATA, loadInitialData, parseAppData, restoreLastGood as restoreShadow, saveData, type Recovery } from '../lib/data'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, OrderItem, Purchase, Settings, Template } from '../types'
+import { applyRecovery, EMPTY_DATA, loadInitialData, parseAppData, readActiveGroup, restoreLastGood as restoreShadow, saveData, writeActiveGroup, type Recovery } from '../lib/data'
 import { formatSavedAt } from '../lib/format'
 import { Button } from '../components/ui/button'
 import { Sheet } from '../components/ui/sheet'
 import { suggestStyle } from '../lib/members'
 import { uid } from '../lib/utils'
 import { today as todayStr } from '../logic/dates'
+import {
+  groupToView,
+  newGroup,
+  planAbsenceAll,
+  TEMPLATE_INFO,
+  TERMS,
+  updateGroupView,
+  withAbsencesAdded,
+  withAbsencesRemoved,
+  withGroupAdded,
+  withGroupEdited,
+  withGroupRemoved,
+  withGroupRestored,
+  type Terms,
+} from '../logic/groups'
 import { applySettingsPatch, nextSettlementDate, priceKey, upsertPrices, type PriceInput } from '../logic/fairness'
 
 type MemberPatch = Partial<Pick<Member, 'name' | 'color' | 'emoji'>> & { favorite?: Order | null }
 
 interface Store {
-  data: AppData
+  /** 지금 보고 있는 그룹의 데이터 (v2까지의 데이터와 같은 모양) */
+  data: GroupView
+  /** 저장되는 전체 데이터 (내보내기용) */
+  root: AppData
+  groups: Group[]
+  /** 현재 그룹 템플릿의 용어 (커피는 지금 문구 그대로) */
+  terms: Terms
+  switchGroup: (id: string) => void
+  /** 새 그룹을 만들고 그 그룹으로 이동. 새 id를 반환 */
+  addGroup: (g: { name: string; emoji: string; template: Template }) => string
+  updateGroup: (id: string, patch: { name?: string; emoji?: string }) => void
+  /** 그룹 삭제(마지막 하나는 삭제 불가 → null). 되돌리기 함수를 반환 */
+  removeGroup: (id: string) => (() => void) | null
+  /** 현재 그룹의 휴가를, 이름이 같은 멤버가 있는 모든 그룹에 등록 */
+  addAbsenceAll: (
+    memberId: string,
+    from: DateStr,
+    to: DateStr,
+  ) => { applied: number; noMatch: number; ambiguous: number; undo: () => void }
   today: DateStr
   memberById: (id: string) => Member | undefined
   /** 구매 기록 등록/수정(날짜가 키). 되돌리기 함수를 반환 */
@@ -56,19 +89,23 @@ export function useStore(): Store {
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AppData>(EMPTY_DATA)
+  const [root, setRoot] = useState<AppData>(EMPTY_DATA)
+  // 이 기기에서 보고 있는 그룹 (데이터가 아니라 화면 상태라 데이터·섀도를 다시 쓰지 않는다)
+  const [activeId, setActiveId] = useState<string | null>(() => readActiveGroup())
   const [ready, setReady] = useState(false)
   const [blocked, setBlocked] = useState<string | undefined>()
   // 옛 버전 앱이 덮어썼을 가능성이 있을 때: 사용자가 고르기 전까지 저장하지 않는다
   const [recovery, setRecovery] = useState<Recovery | undefined>()
   const [recoveryFailed, setRecoveryFailed] = useState(false)
   const [today, setToday] = useState(todayStr())
-  const ref = useRef(data)
-  ref.current = data
+  const rootRef = useRef(root)
+  rootRef.current = root
+  const group = root.groups.find((g) => g.id === activeId) ?? root.groups[0]
+  const data = useMemo(() => groupToView(group), [group])
 
   useEffect(() => {
     loadInitialData().then((r) => {
-      setData(r.data)
+      setRoot(r.data)
       setBlocked(r.blocked)
       setRecovery(r.recovery)
       setReady(true)
@@ -76,8 +113,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (ready && !blocked && !recovery) saveData(data)
-  }, [data, ready, blocked, recovery])
+    if (ready && !blocked && !recovery) saveData(root)
+  }, [root, ready, blocked, recovery])
 
   // 자정을 넘기거나 앱으로 돌아왔을 때 '오늘' 갱신
   useEffect(() => {
@@ -90,10 +127,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // 모든 변경은 updatedAt을 갱신한다
-  const set = useCallback((fn: (d: AppData) => AppData) => setData((d) => ({ ...fn(d), updatedAt: Date.now() })), [])
-
   const store = useMemo<Store>(() => {
+    // 모든 변경은 '만들어질 때의 그룹'에 묶인다: 되돌리기(undo)가 그룹을 바꾼 뒤에 눌려도 엉뚱한 그룹을 건드리지 않는다.
+    // 그리고 updatedAt을 갱신한다.
+    const gid = group.id
+    const set = (fn: (v: GroupView) => GroupView) => setRoot((r) => updateGroupView(r, gid, fn))
+    const cur = () => groupToView(rootRef.current.groups.find((g) => g.id === gid) ?? group)
     const putPurchase = (p: Purchase | undefined, date: DateStr) =>
       set((d) => {
         const rest = d.purchases.filter((x) => x.date !== date)
@@ -104,20 +143,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const rest = d.orders.filter((x) => x.date !== date)
         return { ...d, orders: day && day.items.length ? [...rest, day].sort((a, b) => (a.date < b.date ? -1 : 1)) : rest }
       })
-    const dayOf = (date: DateStr) => ref.current.orders.find((o) => o.date === date)
+    const dayOf = (date: DateStr) => cur().orders.find((o) => o.date === date)
 
     return {
       data,
+      root,
       today,
+      groups: root.groups,
+      terms: TERMS[group.template],
+      switchGroup: (id) => {
+        if (!rootRef.current.groups.some((g) => g.id === id)) return
+        setActiveId(id)
+        writeActiveGroup(id)
+      },
+      addGroup: ({ name, emoji, template }) => {
+        const id = uid()
+        const g = newGroup(id, template, name.trim() || TEMPLATE_INFO[template].defaultName, emoji)
+        setRoot((r) => withGroupAdded(r, g))
+        setActiveId(id)
+        writeActiveGroup(id)
+        return id
+      },
+      updateGroup: (id, patch) => setRoot((r) => withGroupEdited(r, id, patch)),
+      removeGroup: (id) => {
+        const res = withGroupRemoved(rootRef.current, id)
+        if (!res) return null // 마지막 그룹은 삭제할 수 없다
+        setRoot((r) => withGroupRemoved(r, id)?.root ?? r)
+        if (group.id === id) {
+          const next = res.root.groups[0]
+          setActiveId(next.id)
+          writeActiveGroup(next.id)
+        }
+        return () => setRoot((r) => withGroupRestored(r, res.removed, res.index))
+      },
+      addAbsenceAll: (memberId, from, to) => {
+        const plan = planAbsenceAll(rootRef.current, gid, memberId, from, to, uid)
+        const ids = new Set(plan.items.map((i) => i.absence.id))
+        setRoot((r) => withAbsencesAdded(r, plan.items))
+        return {
+          applied: plan.items.length,
+          noMatch: plan.noMatch,
+          ambiguous: plan.ambiguous,
+          undo: () => setRoot((r) => withAbsencesRemoved(r, ids)),
+        }
+      },
       memberById: (id) => data.members.find((m) => m.id === id),
 
       savePurchase: (p) => {
-        const prev = ref.current.purchases.find((x) => x.date === p.date)
+        const prev = cur().purchases.find((x) => x.date === p.date)
         putPurchase({ ...p, memo: p.memo?.trim() || undefined }, p.date)
         return () => putPurchase(prev, p.date)
       },
       removePurchase: (date) => {
-        const prev = ref.current.purchases.find((x) => x.date === date)
+        const prev = cur().purchases.find((x) => x.date === date)
         putPurchase(undefined, date)
         return () => putPurchase(prev, date)
       },
@@ -129,7 +207,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return () => set((d) => ({ ...d, absences: d.absences.filter((x) => x.id !== a.id) }))
       },
       removeAbsence: (id) => {
-        const prev = ref.current.absences.find((x) => x.id === id)
+        const prev = cur().absences.find((x) => x.id === id)
         set((d) => ({ ...d, absences: d.absences.filter((x) => x.id !== id) }))
         return () => {
           if (prev) set((d) => ({ ...d, absences: [...d.absences, prev] }))
@@ -220,24 +298,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         set((d) => ({ ...d, settings: { ...d.settings, balanceSince: nextSettlementDate(todayStr(), d.purchases) } })),
 
       importJson: (text) => {
-        setData(parseAppData(JSON.parse(text))) // 실패(형식 오류·미래 버전)하면 throw → 호출측에서 안내
+        setRoot(parseAppData(JSON.parse(text))) // 실패(형식 오류·미래 버전)하면 throw → 호출측에서 안내
       },
       restoreLastGood: () => {
-        const restored = restoreShadow(ref.current)
+        const restored = restoreShadow(rootRef.current)
         if (!restored) return false
-        set(() => restored)
+        setRoot({ ...restored, updatedAt: Date.now() })
         return true
       },
       resetToInitial: async () => {
         try {
           const res = await fetch(`${import.meta.env.BASE_URL}data.json`, { cache: 'no-cache' })
-          setData(res.ok ? parseAppData(await res.json()) : EMPTY_DATA)
+          setRoot(res.ok ? parseAppData(await res.json()) : EMPTY_DATA)
         } catch {
-          setData(EMPTY_DATA)
+          setRoot(EMPTY_DATA)
         }
       },
     }
-  }, [data, today, set])
+  }, [root, today, group, data])
 
   if (!ready) return null
   if (blocked) {
@@ -260,9 +338,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         failed={recoveryFailed}
         onChoose={(choice) => {
           if (!recovery) return
-          const r = applyRecovery(choice, recovery, ref.current)
+          const r = applyRecovery(choice, recovery, rootRef.current)
           if (!r.ok) return setRecoveryFailed(true) // 보관에 실패하면 선택을 확정하지 않는다
-          setData(r.data)
+          setRoot(r.data)
           setRecovery(undefined)
         }}
       />

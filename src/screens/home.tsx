@@ -4,6 +4,7 @@ import { useRef, useState, type CSSProperties } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, SectionTitle } from '@/components/common'
 import { CoffeeCup, EmptyCup, LogoMark } from '@/components/illustrations'
+import { GroupSwitcher } from '@/components/group-switcher'
 import { InstallBanner } from '@/components/install'
 import { OrderCard } from '@/components/order-card'
 import { PricePurchaseSheet } from '@/components/price-sheet'
@@ -23,6 +24,7 @@ import {
   rankMembers,
 } from '@/logic/nextBuyer'
 import { needsPriceSheet, type PriceInput } from '@/logic/fairness'
+import { sharePrefix } from '@/logic/groups'
 import { buildShareText } from '@/logic/shareText'
 import type { Pricing } from '@/types'
 import { useStore } from '@/store/store'
@@ -36,7 +38,8 @@ function relativeDays(from: string, to: string): string {
 }
 
 export function HomeScreen({ goSettings }: { goSettings: () => void }) {
-  const { data, today, memberById, savePurchase, removePurchase, savePrices } = useStore()
+  const { data, terms, today, memberById, savePurchase, removePurchase, savePrices } = useStore()
+  const isCoffee = data.template === 'coffee'
   const toast = useToast()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [priceFor, setPriceFor] = useState<{ memberId: string; fromButton: boolean } | null>(null)
@@ -46,10 +49,11 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
   if (data.members.length === 0) {
     return (
       <div className="px-5 pt-8">
+        <GroupSwitcher />
         <EmptyState
           illustration={<EmptyCup />}
           title="아직 멤버가 없어요"
-          body="함께 커피를 마실 동료를 먼저 추가해 주세요."
+          body={terms.emptyMembers}
           action={<Button onClick={goSettings}>멤버 추가하러 가기</Button>}
         />
       </div>
@@ -86,12 +90,12 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
       // 이미 기록된 날의 구매자 변경: 금액 기록은 그대로 두고 결제자만 바꾼다
       const undo = savePurchase({ ...todayPurchase, memberId })
       toast({ message: `${memberById(memberId)?.name ?? ''}님으로 바꿨어요`, actionLabel: '되돌리기', onAction: undo })
-    } else if (needsPriceSheet(data.settings)) setPriceFor({ memberId, fromButton })
+    } else if (isCoffee && needsPriceSheet(data.settings)) setPriceFor({ memberId, fromButton })
     else record(memberId, fromButton)
   }
 
   const share = async () => {
-    const ok = await copyText(buildShareText(today, data))
+    const ok = await copyText(buildShareText(today, data, 2, sharePrefix(data)))
     toast({ message: ok ? '공유용 텍스트를 복사했어요' : '복사에 실패했어요', duration: 2500 })
   }
 
@@ -108,6 +112,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           {parseDate(today).getMonth() + 1}월 {parseDate(today).getDate()}일 {weekdayKo(today)}요일
         </span>
       </div>
+      <GroupSwitcher />
 
       {/* ───── 오늘의 당번 히어로 (메뉴판 느낌) ───── */}
       <motion.section
@@ -126,7 +131,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
 
         <div className="relative flex items-start justify-between">
           <div>
-            <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">TODAY&apos;S BREW</p>
+            <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">{terms.heroEyebrow}</p>
             <p className="mt-1 text-[15px] font-semibold text-[#d7c4a8]">
               {isToday ? '오늘의 당번' : `${formatShort(target)} 당번`}
             </p>
@@ -146,13 +151,13 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
               <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-[#d7c4a8]">
                 {done ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-caramel px-3 py-1 text-[13px] font-bold text-on-caramel">
-                    <Check size={14} strokeWidth={3} /> 오늘 구매 완료
+                    <Check size={14} strokeWidth={3} /> {terms.doneBadge}
                   </span>
                 ) : null}
                 <span>
                   {last
-                    ? `마지막 구매: ${formatMD(last)} (${relativeDays(last, done ? today : target)})`
-                    : '아직 한 번도 안 샀어요'}
+                    ? `${terms.lastLabel}: ${formatMD(last)} (${relativeDays(last, done ? today : target)})`
+                    : terms.never}
                 </span>
               </div>
               {todayPurchase?.memo && <p className="mt-1 text-sm text-[#d7c4a8]/80">“{todayPurchase.memo}”</p>}
@@ -188,7 +193,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
               {done ? (
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1 border-white/20 bg-white/10 text-[#faf6f0] hover:bg-white/15" onClick={() => setSheetOpen(true)}>
-                    <UserRoundPen size={18} /> 구매자 변경
+                    <UserRoundPen size={18} /> {terms.changeBuyer}
                   </Button>
                   <Button
                     variant="outline"
@@ -210,14 +215,14 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
                       onClick={() => askBuy(buyer.id, true)}
                       className="breathe flex min-h-16 w-full items-center justify-center gap-2.5 rounded-[22px] bg-caramel text-[19px] font-extrabold text-on-caramel"
                     >
-                      <Check size={22} strokeWidth={3} /> 샀어요
+                      <Check size={22} strokeWidth={3} /> {terms.doneBtn}
                     </motion.button>
                   </motion.div>
                   <button
                     onClick={() => setSheetOpen(true)}
                     className="mt-1 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl text-[15px] font-semibold text-[#d7c4a8] underline decoration-[#d7c4a8]/40 underline-offset-4 hover:bg-white/5"
                   >
-                    다른 사람이 샀어요
+                    {terms.otherBtn}
                   </button>
                 </>
               ) : null}
@@ -226,7 +231,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
         </div>
       </motion.section>
 
-      {isToday && <OrderCard date={today} />}
+      {isToday && isCoffee && <OrderCard date={today} />}
 
       {/* ───── 앞으로 5영업일 ───── */}
       <Card className="mt-5">
@@ -271,7 +276,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
       <Sheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        title={done ? '구매자를 바꿀까요?' : '누가 샀어요?'}
+        title={done ? terms.changeSheet : terms.whoSheet}
         description="아바타를 누르면 바로 기록돼요"
       >
         <MemberPicker

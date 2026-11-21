@@ -3,6 +3,7 @@ import { Download, GripVertical, History, Plus, RotateCcw, Smartphone, Trash2, U
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, PageHeader, Segmented, SectionTitle } from '@/components/common'
+import { GroupsCard } from '@/components/groups-card'
 import { NumberInput } from '@/components/number-input'
 import { InstallSheet } from '@/components/install'
 import { fieldsFromOrder, OrderFields, orderFromFields } from '@/components/order-fields'
@@ -23,7 +24,7 @@ import type { BuyerRule, Member, PriceEntry, PriceMode } from '@/types'
 type Editing = { mode: 'add' } | { mode: 'edit'; member: Member } | null
 
 export function SettingsScreen() {
-  const { data, today, reorderMembers, removeMember, importJson, resetToInitial, restoreLastGood, addCustomMenu, removeCustomMenu } = useStore()
+  const { data, root, groups, today, reorderMembers, removeMember, importJson, resetToInitial, restoreLastGood, addCustomMenu, removeCustomMenu } = useStore()
   const [menuInput, setMenuInput] = useState('')
   const toast = useToast()
   const [editing, setEditing] = useState<Editing>(null)
@@ -53,6 +54,8 @@ export function SettingsScreen() {
     <div className="pb-8">
       <PageHeader title="설정" subtitle="SETTINGS" />
       <div className="space-y-5 px-5">
+        <GroupsCard />
+
         <Card className="p-4">
           <SectionTitle
             right={
@@ -63,6 +66,11 @@ export function SettingsScreen() {
           >
             멤버 · 순서
           </SectionTitle>
+          {groups.length > 1 && (
+            <p className="mb-1 text-[13px] font-semibold">
+              {data.emoji} {data.name} 그룹의 멤버예요
+            </p>
+          )}
           <p className="mb-3 text-[13px] text-ink-2">손잡이를 잡고 끌어서 순서를 바꿔요. 순서는 같은 조건일 때 우선순위가 돼요.</p>
           <Reorder.Group axis="y" values={ids} onReorder={setOrder} className="space-y-2">
             {list.map((m, i) => (
@@ -82,6 +90,8 @@ export function SettingsScreen() {
           {list.length === 0 && <p className="py-6 text-center text-ink-2">멤버를 추가해 주세요</p>}
         </Card>
 
+        {data.template === 'coffee' && (
+          <>
         <Card>
           <SectionTitle>메뉴 목록</SectionTitle>
           <p className="mb-3 text-[13px] text-ink-2">기본 메뉴 외에 우리 팀만 쓰는 메뉴를 추가할 수 있어요.</p>
@@ -124,6 +134,8 @@ export function SettingsScreen() {
 
         <BuyerRuleCard />
         <PriceListCard />
+          </>
+        )}
 
         <Card>
           <SectionTitle>앱</SectionTitle>
@@ -138,7 +150,7 @@ export function SettingsScreen() {
             이 기기의 브라우저에 저장돼요. 다른 기기로 옮기거나 백업하려면 파일로 내보내 주세요.
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="soft" onClick={() => downloadJson(data, `coffee-duty-${today}.json`)}>
+            <Button variant="soft" onClick={() => downloadJson(root, `coffee-duty-${today}.json`)}>
               <Download size={18} /> 내보내기
             </Button>
             <Button variant="soft" onClick={() => fileRef.current?.click()}>
@@ -341,10 +353,12 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
           ))}
         </div>
       </div>
-      <div className="border-t border-line pt-5">
-        <p className="mb-3 text-[15px] font-bold">기본 메뉴</p>
-        <OrderFields value={fav} onChange={setFav} customMenus={data.customMenus} allowNone idPrefix="fav" />
-      </div>
+      {data.template === 'coffee' && (
+        <div className="border-t border-line pt-5">
+          <p className="mb-3 text-[15px] font-bold">기본 메뉴</p>
+          <OrderFields value={fav} onChange={setFav} customMenus={data.customMenus} allowNone idPrefix="fav" />
+        </div>
+      )}
       <Button
         size="lg"
         className="w-full"

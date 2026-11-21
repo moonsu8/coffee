@@ -1,7 +1,7 @@
 export type DateStr = string // 'YYYY-MM-DD' (로컬 날짜)
 
 /** 데이터 구조 버전. 구조를 바꿀 때마다 올리고 lib/migrate.ts에 이전 단계를 추가한다 */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export type Temp = 'ice' | 'hot'
 export type Size = 'S' | 'M' | 'L'
@@ -82,15 +82,52 @@ export interface DayOrder {
   updatedAt: number
 }
 
-export interface AppData {
-  schemaVersion: number
-  members: Member[]
-  purchases: Purchase[]
-  absences: Absence[]
-  skipDays: DateStr[]
+/** 그룹 템플릿: 커피(주문·금액 포함 전체 기능) / 일반(순번만: 점심·청소·회의록·발표 등) */
+export type Template = 'coffee' | 'general'
+
+/** 커피 템플릿에만 있는 데이터 */
+export interface CoffeeData {
   orders: DayOrder[]
   customMenus: string[] // 프리셋 외에 사용자가 추가한 메뉴
   priceList: PriceEntry[] // 우리 팀 가격표
   settings: Settings
+}
+
+/** 돌아가며 하는 일 하나. 멤버·기록·휴가·쉬는 날은 그룹마다 따로 가진다 */
+export interface Group {
+  id: string
+  name: string
+  template: Template
+  emoji: string
+  members: Member[]
+  records: Purchase[] // 날짜별 기록 (커피는 구매, 일반은 담당 기록). 날짜가 키
+  absences: Absence[]
+  skipDays: DateStr[]
+  coffee?: CoffeeData // template이 'coffee'일 때만
+}
+
+/** 저장되는 전체 데이터 (v3) */
+export interface AppData {
+  schemaVersion: number
+  groups: Group[] // 항상 1개 이상
   updatedAt: number // 마지막 수정 시각(ms). 내보낸 파일끼리 최신 여부를 구분하는 용도
+}
+
+/**
+ * 화면이 쓰는 '현재 그룹'의 보기. v2까지의 데이터와 같은 모양(members, purchases, orders…)이라
+ * 순번·주문·공평성 로직과 화면 코드를 그대로 쓸 수 있다. 일반 템플릿이면 커피 전용 값은 빈 기본값.
+ */
+export interface GroupView {
+  groupId: string
+  name: string
+  template: Template
+  emoji: string
+  members: Member[]
+  purchases: Purchase[] // = group.records
+  absences: Absence[]
+  skipDays: DateStr[]
+  orders: DayOrder[]
+  customMenus: string[]
+  priceList: PriceEntry[]
+  settings: Settings
 }

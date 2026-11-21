@@ -12,7 +12,8 @@ import { useStore } from '@/store/store'
 import type { Absence, DateStr } from '@/types'
 
 export function AbsencesScreen() {
-  const { data, today, memberById, addAbsence, removeAbsence, addSkipDay, removeSkipDay } = useStore()
+  const { data, groups, today, memberById, addAbsence, addAbsenceAll, removeAbsence, addSkipDay, removeSkipDay } = useStore()
+  const [everywhere, setEverywhere] = useState(false)
   const toast = useToast()
   const [memberId, setMemberId] = useState<string | null>(null)
   const [month, setMonth] = useState(monthKey(today))
@@ -36,8 +37,23 @@ export function AbsencesScreen() {
   const submit = () => {
     if (!memberId || !from) return
     const end = to ?? from
-    const undo = addAbsence(memberId, from, end)
-    toast({ message: `${memberById(memberId)?.name}님 휴가를 등록했어요`, actionLabel: '되돌리기', onAction: undo })
+    const name = memberById(memberId)?.name
+    if (everywhere && groups.length > 1) {
+      // 멤버는 그룹마다 따로라서 이름이 같은 멤버로 연결한다
+      const r = addAbsenceAll(memberId, from, end)
+      const skipped = r.noMatch + r.ambiguous
+      toast({
+        message:
+          `${name}님 휴가를 ${r.applied}개 그룹에 등록했어요` +
+          (skipped > 0 ? ` (이름이 맞는 멤버가 없거나 여러 명인 ${skipped}개 그룹은 건너뜀)` : ''),
+        actionLabel: '되돌리기',
+        onAction: r.undo,
+        duration: 7000,
+      })
+    } else {
+      const undo = addAbsence(memberId, from, end)
+      toast({ message: `${name}님 휴가를 등록했어요`, actionLabel: '되돌리기', onAction: undo })
+    }
     setFrom(null)
     setTo(null)
   }
@@ -85,6 +101,20 @@ export function AbsencesScreen() {
               <span className="text-ink-2">달력에서 시작일과 종료일을 눌러 주세요</span>
             )}
           </div>
+          {groups.length > 1 && (
+            <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl bg-surface-2 px-4 py-2.5">
+              <input
+                type="checkbox"
+                checked={everywhere}
+                onChange={(e) => setEverywhere(e.target.checked)}
+                className="mt-0.5 size-5 shrink-0 accent-[var(--caramel)]"
+              />
+              <span>
+                <span className="block text-[15px] font-semibold">모든 그룹에 적용</span>
+                <span className="block text-[13px] leading-snug text-ink-2">이름이 같은 멤버가 있는 그룹에 함께 등록해요.</span>
+              </span>
+            </label>
+          )}
           <Button size="lg" className="mt-3 w-full" disabled={!memberId || !from} onClick={submit}>
             휴가 등록하기
           </Button>

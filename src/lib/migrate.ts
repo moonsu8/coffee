@@ -9,11 +9,14 @@ import {
   type PriceEntry,
   type PriceMode,
   type Pricing,
+  type Group,
   type Purchase,
   type Settings,
   type Size,
+  type Template,
   DEFAULT_BRAND,
 } from '../types'
+import { COFFEE_GROUP_ID, TEMPLATE_INFO } from '../logic/groups'
 import { NO_DRINK } from '../logic/menu'
 import { uid } from './utils'
 
@@ -43,7 +46,31 @@ function v1ToV2(d: Raw, now: number): Raw {
   }
 }
 
-const STEPS: Record<number, (d: Raw, now: number) => Raw> = { 1: v1ToV2 }
+/**
+ * v2 → v3: 그룹 도입. 기존 데이터 전부를 id가 고정된 "커피" 그룹 하나로 옮긴다.
+ * 값은 건드리지 않고 자리만 바꾼다(members→members, purchases→records, 주문·가격표·설정→coffee).
+ */
+function v2ToV3(d: Raw): Raw {
+  return {
+    schemaVersion: 3,
+    groups: [
+      {
+        id: COFFEE_GROUP_ID,
+        name: TEMPLATE_INFO.coffee.defaultName,
+        template: 'coffee',
+        emoji: TEMPLATE_INFO.coffee.emoji,
+        members: d.members,
+        records: d.purchases,
+        absences: d.absences,
+        skipDays: d.skipDays,
+        coffee: { orders: d.orders, customMenus: d.customMenus, priceList: d.priceList, settings: d.settings },
+      },
+    ],
+    updatedAt: d.updatedAt,
+  }
+}
+
+const STEPS: Record<number, (d: Raw, now: number) => Raw> = { 1: v1ToV2, 2: v2ToV3 }
 
 export function versionOf(input: unknown): number {
   return isObj(input) && typeof input.schemaVersion === 'number' ? input.schemaVersion : 1
@@ -123,7 +150,19 @@ function readSettings(v: unknown): Settings {
   }
 }
 
-function normalizeLatest(d: Raw): AppData {
+/** 그룹 안의 내용(v2까지의 데이터와 같은 모양)을 검증·정규화 */
+interface Content {
+  members: Member[]
+  purchases: Purchase[]
+  absences: Absence[]
+  skipDays: string[]
+  orders: DayOrder[]
+  customMenus: string[]
+  priceList: PriceEntry[]
+  settings: Settings
+}
+
+function normalizeContent(d: Raw): Content {
   if (!Array.isArray(d.members)) throw new Error('올바른 커피 당번 데이터가 아니에요')
 
   const members: Member[] = []
@@ -188,7 +227,6 @@ function normalizeLatest(d: Raw): AppData {
     : []
 
   return {
-    schemaVersion: SCHEMA_VERSION,
     members,
     purchases: [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
     absences,
@@ -197,8 +235,44 @@ function normalizeLatest(d: Raw): AppData {
     customMenus,
     priceList: readPriceList(d.priceList),
     settings: readSettings(d.settings),
-    updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0,
   }
+}
+
+function normalizeGroup(raw: unknown, usedIds: Set<string>): Group | null {
+  if (!isObj(raw)) return null
+  // 알 수 없는 템플릿은 순번만 쓰는 일반으로 (커피 전용 기능을 잘못 켜지 않도록)
+  const template: Template = raw.template === 'coffee' ? 'coffee' : 'general'
+  const id = typeof raw.id === 'string' && raw.id && !usedIds.has(raw.id) ? raw.id : uid()
+  usedIds.add(id)
+  const coffee = isObj(raw.coffee) ? raw.coffee : {}
+  const c = normalizeContent({
+    members: Array.isArray(raw.members) ? raw.members : [],
+    purchases: raw.records,
+    absences: raw.absences,
+    skipDays: raw.skipDays,
+    ...coffee,
+  })
+  return {
+    id,
+    name: str(raw.name) ?? TEMPLATE_INFO[template].defaultName,
+    template,
+    emoji: typeof raw.emoji === 'string' && raw.emoji ? raw.emoji : TEMPLATE_INFO[template].emoji,
+    members: c.members,
+    records: c.purchases,
+    absences: c.absences,
+    skipDays: c.skipDays,
+    ...(template === 'coffee'
+      ? { coffee: { orders: c.orders, customMenus: c.customMenus, priceList: c.priceList, settings: c.settings } }
+      : {}),
+  }
+}
+
+function normalizeRoot(d: Raw): AppData {
+  if (!Array.isArray(d.groups)) throw new Error('올바른 커피 당번 데이터가 아니에요')
+  const used = new Set<string>()
+  const groups = d.groups.map((g) => normalizeGroup(g, used)).filter((g): g is Group => g !== null)
+  if (groups.length === 0) throw new Error('올바른 커피 당번 데이터가 아니에요')
+  return { schemaVersion: SCHEMA_VERSION, groups, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 }
 }
 
 /**
@@ -208,14 +282,27 @@ function normalizeLatest(d: Raw): AppData {
  * - 형식이 아예 틀리면 Error
  */
 export function migrate(input: unknown, now: number = Date.now()): AppData {
-  if (!isObj(input) || !Array.isArray(input.members)) throw new Error('올바른 커피 당번 데이터가 아니에요')
+  if (!isObj(input)) throw new Error('올바른 커피 당번 데이터가 아니에요')
   let v = versionOf(input)
   if (!Number.isInteger(v) || v < 1) v = 1
+  // 미래 버전 검사를 모양 검사보다 먼저 한다 (모양이 다른 새 버전 데이터를 '깨진 데이터'로 오해해 덮어쓰지 않도록)
   if (v > SCHEMA_VERSION) throw new FutureVersionError(v)
+  if (v < 3 ? !Array.isArray(input.members) : !Array.isArray(input.groups)) throw new Error('올바른 커피 당번 데이터가 아니에요')
   let cur: Raw = input
   while (v < SCHEMA_VERSION) {
     cur = STEPS[v](cur, now)
     v++
   }
-  return normalizeLatest(cur)
+  return normalizeRoot(cur)
+}
+
+/**
+ * 저장·내보내기용 직렬화. 최상위에 빈 `members` 배열을 함께 남긴다.
+ * 이미 배포된 옛(v2) 앱은 '모양 검사(members 배열) → 버전 검사' 순서라서, 이 표식이 없으면 v3 데이터를
+ * 깨진 데이터로 보고 초기 데이터로 덮어쓴다. 표식이 있으면 '앱을 업데이트해 주세요' 화면만 띄우고 저장하지 않는다.
+ * (migrate는 v3에서 이 필드를 읽지 않는다)
+ */
+export function serialize(data: AppData, space?: number): string {
+  const { schemaVersion, groups, updatedAt } = data
+  return JSON.stringify({ schemaVersion, members: [], groups, updatedAt }, null, space)
 }

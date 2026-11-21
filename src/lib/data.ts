@@ -1,16 +1,10 @@
 import { SCHEMA_VERSION, type AppData } from '../types'
-import { FutureVersionError, migrate, versionOf } from './migrate'
+import { COFFEE_GROUP_ID, newGroup, TEMPLATE_INFO } from '../logic/groups'
+import { FutureVersionError, migrate, serialize, versionOf } from './migrate'
 
 export const EMPTY_DATA: AppData = {
   schemaVersion: SCHEMA_VERSION,
-  members: [],
-  purchases: [],
-  absences: [],
-  skipDays: [],
-  orders: [],
-  customMenus: [],
-  priceList: [],
-  settings: { buyerRule: 'count', defaultPriceMode: 'none' },
+  groups: [newGroup(COFFEE_GROUP_ID, 'coffee', TEMPLATE_INFO.coffee.defaultName, TEMPLATE_INFO.coffee.emoji)],
   updatedAt: 0,
 }
 
@@ -23,7 +17,9 @@ export const KEY = 'coffee-duty:v1' // 키 이름은 유지하고 값 안의 sch
 export const SHADOW_KEY = 'coffee-duty:shadow' // 저장할 때마다 함께 쓰는 전체 데이터 복사본(옛 앱은 이 키를 모른다)
 export const SHADOW_PREV_KEY = 'coffee-duty:shadow-prev' // "그대로 두기"를 고른 뒤 보관해 둔 이전 shadow
 export const RESTORE_BACKUP_KEY = 'coffee-duty:backup-before-restore' // 되돌리기 직전의 메인 원본
-const BACKUP_KEY = 'coffee-duty:backup-before-v2' // 마이그레이션 직전 원본
+const BACKUP_V2_KEY = 'coffee-duty:backup-before-v2' // v1 → v2 마이그레이션 직전 원본
+const BACKUP_V3_KEY = 'coffee-duty:backup-before-v3' // v1/v2 → v3(그룹 도입) 마이그레이션 직전 원본
+export const ACTIVE_GROUP_KEY = 'coffee-duty:active-group' // 이 기기에서 보고 있는 그룹 (데이터가 아니라 기기별 화면 상태)
 const CORRUPT_KEY = 'coffee-duty:corrupt-backup' // 읽을 수 없던 저장값 원본
 
 /** localStorage의 최소 인터페이스 (테스트에서 메모리 저장소로 대체) */
@@ -72,7 +68,8 @@ export function readShadow(storage: StorageLike | null = browserStorage(), key: 
   if (!raw) return null
   try {
     const json = JSON.parse(raw)
-    if (versionOf(json) !== SCHEMA_VERSION) return null
+    // v1 모양(schemaVersion 없음)은 후보가 아니다. v2 이상이면 현재 버전으로 옮겨서 읽는다(미래 버전은 아래에서 throw → 무시)
+    if (versionOf(json) < 2) return null
     const data = migrate(json)
     return { data, savedAt: data.updatedAt, raw }
   } catch {
@@ -132,7 +129,9 @@ export async function loadInitialData(
     const json = JSON.parse(raw)
     const data = migrate(json)
     // 구버전을 처음 옮기는 순간에만, 원본을 한 번 따로 보관한다 (이미 있으면 덮어쓰지 않음)
-    if (versionOf(json) < SCHEMA_VERSION && !read(storage, BACKUP_KEY)) write(storage, BACKUP_KEY, raw)
+    const from = versionOf(json)
+    if (from < 2 && !read(storage, BACKUP_V2_KEY)) write(storage, BACKUP_V2_KEY, raw)
+    if (from < SCHEMA_VERSION && !read(storage, BACKUP_V3_KEY)) write(storage, BACKUP_V3_KEY, raw)
     const shadow = readShadow(storage)
     if (isOverwrittenByOldApp(json, shadow)) return { data, recovery: toRecovery(shadow!) }
     return { data }
@@ -148,7 +147,7 @@ export async function loadInitialData(
 
 /** 메인과 shadow(마지막 정상 상태)에 함께 저장한다 */
 export function saveData(data: AppData, storage: StorageLike | null = browserStorage()) {
-  const json = JSON.stringify(data)
+  const json = serialize(data)
   write(storage, KEY, json)
   write(storage, SHADOW_KEY, json)
 }
@@ -183,11 +182,19 @@ export function restoreLastGood(current: AppData, storage: StorageLike | null = 
 
 /** 파일로 내려받기 */
 export function downloadJson(data: AppData, filename: string) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const blob = new Blob([serialize(data, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** 이 기기에서 마지막으로 보던 그룹 id (없거나 읽을 수 없으면 null → 첫 그룹) */
+export function readActiveGroup(storage: StorageLike | null = browserStorage()): string | null {
+  return read(storage, ACTIVE_GROUP_KEY)
+}
+export function writeActiveGroup(id: string, storage: StorageLike | null = browserStorage()) {
+  write(storage, ACTIVE_GROUP_KEY, id)
 }

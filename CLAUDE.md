@@ -10,7 +10,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 경로 별칭 `@/` = `src/`
 
 ## 데이터
-- 타입: `src/types.ts` (members, purchases, absences, skipDays). 날짜는 로컬 `YYYY-MM-DD` 문자열.
+- 타입: `src/types.ts`. **저장 구조(`AppData`, v3)는 `groups[]`**이고, 그룹 안에 members/records/absences/skipDays(+커피는 `coffee`)가 있다. 화면·로직은 현재 그룹의 보기 `GroupView`(v2까지와 같은 모양: members, purchases, orders, priceList, settings…)를 쓴다(아래 "그룹" 참고). 날짜는 로컬 `YYYY-MM-DD` 문자열.
 - 구매 기록은 **날짜가 키**(하루 1건). absence에는 삭제용 `id`를 추가했고, member에는 선택값 `color`/`emoji`가 있다.
 - 저장: localStorage `coffee-duty:v1`. 비어 있으면 `public/data.json`(`BASE_URL` 기준)을 초기 데이터로 읽는다. (`src/lib/data.ts`)
 - 가져오기/초기화는 `parseAppData`가 검증·정규화(깨진 항목만 버림). 내보내기는 JSON 다운로드.
@@ -33,6 +33,16 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 토스트(`components/toast.tsx`)는 되돌리기 콜백을 받는다. store의 save/remove 함수는 undo 함수를 반환한다.
 - 애니메이션은 `MotionConfig reducedMotion="user"` + CSS `prefers-reduced-motion`으로 최소화, 컨페티는 `disableForReducedMotion`.
 - 화면: `src/screens/` (home, history, absences, stats, settings). 탭 전환은 `App.tsx`에서 방향별 슬라이드.
+
+## 그룹 (돌아가며 하는 일 엔진, v3)
+- 그룹 = `{ id, name, template, emoji, members, records, absences, skipDays, coffee? }`. 템플릿: **커피**(지금 기능 전부) / **일반**(순번만: 점심·청소·회의록·발표 등). 멤버·기록·휴가·쉬는 날은 **그룹마다 따로**다. 주문·가격표·사용자 메뉴·당번 기준 설정(`orders`/`priceList`/`customMenus`/`settings`)은 커피 그룹의 `coffee`에만 있다.
+- **순번 로직(`nextBuyer`·`fairness`·`order`)은 수정 없이 재사용한다.** 스토어가 현재 그룹을 `GroupView`(`logic/groups.ts`의 `groupToView`/`applyView`)로 바꿔 내보내므로 화면 코드는 그대로이고, 일반 그룹은 `settings`가 기본값(횟수 기준)이라 횟수 기준으로만 동작한다. `records`가 곧 `purchases`다.
+- 모든 변경 함수는 **만들어질 때의 그룹 id에 묶인다**(되돌리기 토스트가 그룹을 바꾼 뒤에 눌려도 엉뚱한 그룹을 건드리지 않음). 루트 변경은 `logic/groups.ts`의 순수 함수(`updateGroupView`/`withGroup*`/`withAbsences*`)로 분리해 테스트한다.
+- 템플릿별 용어는 `TERMS`(`logic/groups.ts`): 커피는 지금 문구 그대로, 일반은 [했어요]. 일반 템플릿은 주문·금액·가격표·커피 수지·기본 메뉴를 숨긴다. 공유 텍스트 머리말은 커피 `☕`, 일반 `{이모지} {이름}`.
+- 홈 상단 전환기(`components/group-switcher.tsx`)는 **그룹이 2개 이상일 때만** 보인다(1개면 v2 화면과 똑같음). 그룹 추가·이름/이모지 변경·삭제는 설정의 "그룹" 카드(`components/groups-card.tsx`). 마지막 그룹은 삭제할 수 없고, 삭제는 5초 되돌리기가 있다. 템플릿은 만든 뒤 바꿀 수 없다.
+- 현재 보는 그룹은 데이터가 아니라 기기별 화면 상태라 별도 키 `coffee-duty:active-group`에 저장한다(전환이 데이터·섀도를 다시 쓰지 않고 내보내기에도 안 섞임).
+- 휴가 "모든 그룹에 적용"(휴가 화면, 그룹 2개 이상일 때): 멤버가 그룹마다 따로라 **이름 일치**(앞뒤 공백 제거, `planAbsenceAll`)로 연결한다. 이름이 맞는 멤버가 없거나 같은 이름이 둘 이상인 그룹은 건너뛰고 몇 개 그룹에 적용됐는지 알린다. 이미 같은 휴가가 있으면 중복 생성하지 않는다. 삭제는 현재 그룹만 지운다.
+- 범위 밖(하지 않음): 템플릿 팩, 유료화, 그룹 간 멤버 공유/연결 ID.
 
 ## PWA 설치 안내
 - `src/lib/install.ts`: `detectEnv`(standalone / 인앱 / iOS / 기타 판별, 순수 함수), `isDismissed`(7일 숨김, localStorage `coffee-duty:install-dismissed`), `useInstall`. `beforeinstallprompt`/`appinstalled`는 React 마운트 전에 올 수 있어 **모듈 로드 시점**에 잡아 보관한다.
@@ -66,11 +76,14 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - v1 → v2: 기존 필드는 값 그대로 보존하고 새 필드만 채운다. 멤버 `order` 값은 재번호하지 않고, 탈퇴한 멤버의 구매·휴가 기록도 버리지 않으며, 휴가 from/to도 뒤집지 않는다.
 - 앱보다 새로운 `schemaVersion`은 `FutureVersionError`로 읽지 않는다. localStorage가 미래 버전이면 앱이 "업데이트해 주세요" 화면만 띄우고 **저장을 막는다**(구버전 앱이 덮어써 잃는 것 방지).
 - 안전장치: 구버전을 처음 옮길 때 원본을 `coffee-duty:backup-before-v2`에 한 번 보관, 읽을 수 없는 저장값은 초기 데이터로 덮어쓰기 전에 `coffee-duty:corrupt-backup`에 보관. 저장 키 `coffee-duty:v1`은 그대로 쓴다.
+- **v3(그룹 도입)**: v1·v2 모두 `STEPS`를 거쳐 v3가 된다. v2 → v3는 기존 데이터 전부를 **id가 고정된(`g-coffee`) "커피" 그룹 하나**로 옮기고(members→members, purchases→records, 주문·가격표·사용자 메뉴·설정→`coffee`) 값은 건드리지 않는다. 몇 번을 옮겨도 결과가 같다(멱등). 원본은 처음 옮길 때 `coffee-duty:backup-before-v3`에 한 번 보관(v1은 `backup-before-v2`도).
+- **옛 앱 보호 표식**: 저장·내보내기 JSON(`serialize`) 최상위에 빈 `members: []`를 항상 남긴다. 이미 배포된 v2 앱의 `migrate`는 "모양 검사(members 배열) → 버전 검사" 순서라서, 표식이 없으면 v3 데이터를 깨진 데이터로 보고 초기 데이터로 덮어쓴다. 표식이 있으면 `FutureVersionError`("업데이트해 주세요" 화면, 저장 안 함)가 된다. 새 코드의 `migrate`는 **버전 검사를 모양 검사보다 먼저** 한다. 구조를 또 바꿀 때도 이 표식을 유지한다(테스트 `shadow.test.ts`가 고정).
 - **shadow(마지막 정상 상태)**: 저장할 때마다 메인(`coffee-duty:v1`)과 함께 전체 데이터를 `coffee-duty:shadow`에도 쓴다(`updatedAt` 포함). 이미 배포된 옛 버전 앱(`42cb18e`)은 `schemaVersion`을 검사하지 않고 **열기만 해도** 아는 필드만 남겨 다시 저장해 `orders`·`priceList`·`pricing`·`favorite`·`settings`를 지우므로, 그 경우를 감지하기 위한 장치다. 옛 앱은 shadow 키를 모른다.
   - 로드 시 메인이 v1 모양(schemaVersion 없음)인데 v2 shadow가 있고 더 최신이면(또는 메인이 읽을 수 없는데 정상 shadow가 있으면) **자동 복구/병합하지 않고** 바텀시트로 묻는다. 묻는 동안에는 저장하지 않는다(shadow가 덮어써지지 않도록).
   - "되돌리기": 지금 메인을 `coffee-duty:backup-before-restore`에 남기고 shadow 전체를 복원. "그대로 두기": 메인을 정상 마이그레이션하고 이전 shadow는 `coffee-duty:shadow-prev`에 보관. 보관에 실패하면 선택을 확정하지 않는다. `shadow-prev`는 앱 화면에서 복구하는 메뉴를 **의도적으로 두지 않았다**(복구 시트의 "그대로 두기" 아래에 "이 선택은 되돌릴 수 없어요" 안내만 있다). 초기화·가져오기는 섀도를 새 상태로 바꾸는 지금 동작 그대로다.
-  - shadow가 없거나 깨졌거나 v2가 아니면(미래 버전 포함) 조용히 무시한다. 설정 > 데이터의 "마지막 정상 상태로 되돌리기"는 같은 복원을 수동으로 한다. 로직은 `lib/data.ts`(`readShadow`/`isOverwrittenByOldApp`/`applyRecovery`/`restoreLastGood`), 테스트는 `lib/shadow.test.ts`.
-- **실제 데이터 검증**: 총무 폰에서 내보낸 JSON을 `backup/`에 넣고 `npm run check:migration`. 개수·값 일치 여부만 출력(실명 미출력), 원본은 읽기만 한다. `backup/`은 `.gitignore`에 있고 **절대 커밋하지 않는다**(실명 포함). 배포 전에 이 검증을 통과시킨다.
+  - v3부터 shadow는 **v2 이상이면 복구 후보**(현재 버전으로 올려 읽음)이고, 메인이 더 낮은 버전(v1 모양·배포 전 v2 화면이 덮어쓴 v2 모양)이며 shadow가 더 최신(`updatedAt`)이면 묻는다. 같은 시점에 함께 쓴 v2 메인+v2 shadow는 질문 없이 v3로 옮긴다.
+  - shadow가 없거나 깨졌거나 v1 모양이면(미래 버전 포함) 조용히 무시한다. 설정 > 데이터의 "마지막 정상 상태로 되돌리기"는 같은 복원을 수동으로 한다. 로직은 `lib/data.ts`(`readShadow`/`isOverwrittenByOldApp`/`applyRecovery`/`restoreLastGood`), 테스트는 `lib/shadow.test.ts`.
+- **실제 데이터 검증**: 총무 폰에서 내보낸 JSON을 `backup/`에 넣고 `npm run check:migration`. **v1/v2 파일은 "커피" 그룹으로 값까지 옮겨졌는지**(멤버·기록·금액·휴가·쉬는 날·주문·가격표·사용자 메뉴·설정), v3 파일은 그룹별 왕복 일치를 확인한다. 개수·값 일치 여부만 출력(실명 미출력), 원본은 읽기만 한다. 키 순서와 무관하게 값을 비교한다(오탐 방지). `backup/`은 `.gitignore`에 있고 **절대 커밋하지 않는다**(실명 포함). 배포 전에 이 검증을 통과시킨다.
 
 ## 배포 규칙 (운영)
 이 저장소는 `main`에 push하면 곧바로 배포되고, 총무 폰에 실제 기록이 있다. 이미 배포된 옛 버전은 v2 데이터의 모르는 필드를 지워 버릴 수 있으므로 다음을 지킨다.
@@ -80,14 +93,15 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 배포 직후 총무 폰에서 설치 앱과 브라우저 탭을 **모두 닫았다가 다시 연다.** 가능하면 설치 앱만 쓰고, 같은 사이트를 브라우저 탭으로 같이 열어 두지 않는다(오래 열려 있던 옛 화면이 저장하면 덮어쓸 수 있다).
 - 서비스 워커는 `autoUpdate`(`skipWaiting` + `clientsClaim`, 갱신되면 열린 화면을 자동 새로고침)다. 배포 직후 첫 실행은 캐시된 옛 화면이 먼저 뜰 수 있으니 한 번 더 열어 최신인지 확인한다.
 - 그래도 데이터가 사라져 보이면: 앱을 다시 열 때 "마지막 정상 상태로 되돌릴까요?"가 뜨면 되돌리기를 선택하고, 안 뜨면 설정 > 데이터 > "마지막 정상 상태로 되돌리기"를 쓴다. 그 전에 데이터를 더 수정하지 않는다.
+- **v3(그룹) 배포는 스키마 변경 배포다.** 직전 단계(v2) 배포가 총무 폰에서 안정적임을 확인하고, **v2 상태에서 내보낸 JSON**으로 `check:migration`을 통과시킨 뒤 push한다. 배포 후 v2 앱은 v3 데이터를 열면 "업데이트해 주세요" 화면만 띄운다(위 표식).
 - 새 버전이 안정적으로 퍼진 뒤에도, 스키마를 바꾸는 배포는 한 번에 한 단계씩, 로컬에서 `check:migration`과 화면 확인을 끝낸 뒤에만 한다.
 
 ## 개발 규칙
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 161개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `migrate`, `pricing-migrate`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
-- **미확인**: 주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
+- 테스트 194개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- **미확인**: 그룹 전환기·그룹 관리 카드·휴가 "모든 그룹에 적용"·주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)
 - 주소: `https://<아이디>.github.io/coffee/` (저장소 이름이 `coffee`일 때). 저장소는 public.

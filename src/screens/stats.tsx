@@ -14,7 +14,7 @@ import { useStore } from '@/store/store'
 type Range = 'month' | 'all'
 
 export function StatsScreen() {
-  const { data, today } = useStore()
+  const { data, terms, today } = useStore()
   const [range, setRange] = useState<Range>('month')
   const month = monthKey(today)
 
@@ -39,8 +39,8 @@ export function StatsScreen() {
           className="relative overflow-hidden rounded-card bg-espresso p-6 text-[#faf6f0] shadow-pop"
           style={{ background: 'radial-gradient(100% 90% at 100% 0%, var(--hero-glow), transparent 60%), var(--espresso)', ['--surface' as string]: '#fffdf9' }}
         >
-          <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">COFFEE KING</p>
-          <h2 className="mt-1 text-[17px] font-bold text-[#d7c4a8]">이번 달 커피왕 👑</h2>
+          <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">{terms.kingEyebrow}</p>
+          <h2 className="mt-1 text-[17px] font-bold text-[#d7c4a8]">{terms.kingTitle}</h2>
           {kings.length > 0 ? (
             <div className="mt-4 flex items-center gap-4">
               <div className="flex -space-x-3">
@@ -56,12 +56,12 @@ export function StatsScreen() {
                 </p>
                 <p className="text-[15px] text-[#d7c4a8]">
                   {kings.length > 1 ? '공동 1위 · ' : ''}
-                  {monthMax}번 샀어요
+                  {terms.kingCount(monthMax)}
                 </p>
               </div>
             </div>
           ) : (
-            <p className="mt-4 text-[15px] leading-relaxed text-[#d7c4a8]">이번 달엔 아직 기록이 없어요. 첫 번째 커피왕은 누구일까요?</p>
+            <p className="mt-4 text-[15px] leading-relaxed text-[#d7c4a8]">{terms.kingEmpty}</p>
           )}
         </section>
 
@@ -79,10 +79,10 @@ export function StatsScreen() {
           <SectionTitle
             right={<span className="text-sm font-semibold text-ink-2">총 {total}번</span>}
           >
-            1인당 구매 횟수
+            {terms.countTitle}
           </SectionTitle>
           {total === 0 ? (
-            <EmptyState illustration={<EmptyCup />} title="아직 통계가 없어요" body="커피를 기록하면 여기에 막대그래프가 그려져요." />
+            <EmptyState illustration={<EmptyCup />} title="아직 통계가 없어요" body={terms.statsEmpty} />
           ) : (
             <ul className="space-y-3.5">
               {rows.map(({ m, n }, i) => (
@@ -110,7 +110,7 @@ export function StatsScreen() {
           )}
         </Card>
 
-        <BalanceCard range={range} month={month} />
+        {data.template === 'coffee' && <BalanceCard range={range} month={month} />}
       </div>
     </div>
   )
