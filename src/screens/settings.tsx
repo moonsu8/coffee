@@ -9,7 +9,7 @@ import { InstallSheet } from '@/components/install'
 import { fieldsFromOrder, OrderFields, orderFromFields } from '@/components/order-fields'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
-import { Sheet } from '@/components/ui/sheet'
+import { Sheet, SheetFooter } from '@/components/ui/sheet'
 import { downloadJson, readShadow } from '@/lib/data'
 import { formatSavedAt, won } from '@/lib/format'
 import { readMetrics } from '@/lib/metrics'
@@ -359,6 +359,7 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
           <OrderFields value={fav} onChange={setFav} customMenus={data.customMenus} allowNone idPrefix="fav" />
         </div>
       )}
+      <SheetFooter>
       <Button
         size="lg"
         className="w-full"
@@ -372,6 +373,7 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
       >
         {base ? '저장' : '추가하기'}
       </Button>
+      </SheetFooter>
     </div>
   )
 }

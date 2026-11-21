@@ -25,7 +25,7 @@ import { Card, SectionTitle } from './common'
 import { emptyFields, fieldsFromOrder, OrderFields, orderFromFields, type FieldsValue } from './order-fields'
 import { useToast } from './toast'
 import { Button } from './ui/button'
-import { Sheet } from './ui/sheet'
+import { Sheet, SheetFooter } from './ui/sheet'
 
 /** 홈의 "오늘의 주문" 카드 */
 export function OrderCard({ date }: { date: DateStr }) {
@@ -191,7 +191,7 @@ function SheetBody({ date, member, line, onClose }: { date: DateStr; member: Mem
         />
         <span className="text-[15px] font-semibold">이걸 기본 메뉴로 저장</span>
       </label>
-      <div className="flex gap-2">
+      <SheetFooter className="flex gap-2">
         {line?.edited && (
           <Button
             variant="soft"
@@ -208,7 +208,7 @@ function SheetBody({ date, member, line, onClose }: { date: DateStr; member: Mem
         <Button size="lg" className="flex-1" disabled={!order} onClick={save}>
           저장
         </Button>
-      </div>
+      </SheetFooter>
     </div>
   )
 }

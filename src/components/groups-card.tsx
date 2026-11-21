@@ -7,7 +7,7 @@ import type { Group, Template } from '@/types'
 import { Card, SectionTitle } from './common'
 import { useToast } from './toast'
 import { Button } from './ui/button'
-import { Sheet } from './ui/sheet'
+import { Sheet, SheetFooter } from './ui/sheet'
 
 /** 그룹 관리: 추가 · 이름/이모지 변경 · 삭제 (마지막 하나는 삭제할 수 없다) */
 export function GroupsCard() {
@@ -203,7 +203,7 @@ function GroupForm({
           ))}
         </div>
       </div>
-      <div className="flex gap-2">
+      <SheetFooter className="flex gap-2">
         {editing && (
           <Button variant="danger" size="lg" disabled={!canDelete} onClick={onDelete}>
             삭제
@@ -220,7 +220,7 @@ function GroupForm({
         >
           {editing ? '저장' : '추가하기'}
         </Button>
-      </div>
+      </SheetFooter>
       {editing && !canDelete && <p className="-mt-2 text-[13px] text-ink-2">마지막 그룹은 삭제할 수 없어요.</p>}
     </div>
   )

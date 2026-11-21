@@ -32,6 +32,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 카드 `rounded-card`(24px) + `shadow-card`(갈색 톤). 터치 영역 최소 44px. 숫자는 body 전체에 tabular-nums.
 - 토스트(`components/toast.tsx`)는 되돌리기 콜백을 받는다. store의 save/remove 함수는 undo 함수를 반환한다.
 - 애니메이션은 `MotionConfig reducedMotion="user"` + CSS `prefers-reduced-motion`으로 최소화, 컨페티는 `disableForReducedMotion`.
+- **바텀시트(`components/ui/sheet.tsx`) 규칙**: 구조는 헤더(손잡이·제목) / 가운데 스크롤 영역 / 하단 고정 푸터(`SheetFooter`) / 안전영역 여백. **끌어서 닫기는 손잡이에만** 건다(`dragControls` + `dragListener={false}`). **시트 컨테이너나 스크롤 영역에 `drag`를 걸지 말 것** — Framer Motion이 그 요소에 `touch-action: pan-x`를 걸어 세로 스와이프 스크롤이 안 된다(안드로이드에서 내용이 안 움직이고 저장 버튼에 못 가던 버그의 원인). 스크롤 영역은 `flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y`, 최대 높이는 `100dvh` 기준. 내용이 긴 폼의 저장·추가 같은 주요 버튼은 폼 안에서 `<SheetFooter>`로 감싸 하단에 고정한다(시트가 푸터 영역으로 옮겨 그리며, 폼 상태는 그대로 쓴다). `index.html`의 viewport에 `interactive-widget=resizes-content`가 있어 안드로이드 키보드가 올라와도 하단 버튼이 키보드 위에 보인다.
 - 화면: `src/screens/` (home, history, absences, stats, settings). 탭 전환은 `App.tsx`에서 방향별 슬라이드.
 
 ## 그룹 (돌아가며 하는 일 엔진, v3)
@@ -101,6 +102,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 
 ## 상태
 - 테스트 194개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 시트 터치 스크롤은 설치된 Chrome에 실제 터치 이벤트(`touchStart/Move/End`)를 보내는 방식(360x800·다크·`playwright-core`를 `--no-save`로 임시 설치)으로 확인했다: 수정 전 스와이프 0px·저장 버튼 화면 밖 → 수정 후 스크롤·저장 버튼 고정 노출. `synthesizeScrollGesture`는 이 환경에서 스크롤을 일으키지 못하므로 쓰지 말고, 항상 홈 화면 같은 대조군으로 도구가 동작하는지 먼저 확인한다.
 - **미확인**: 그룹 전환기·그룹 관리 카드·휴가 "모든 그룹에 적용"·주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)

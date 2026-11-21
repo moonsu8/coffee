@@ -7,7 +7,7 @@ import { useStore } from '@/store/store'
 import type { DateStr, Pricing } from '@/types'
 import { PricingFields } from './pricing-fields'
 import { Button } from './ui/button'
-import { Sheet } from './ui/sheet'
+import { Sheet, SheetFooter } from './ui/sheet'
 
 interface Props {
   open: boolean
@@ -49,6 +49,7 @@ function Body({ memberId, date, onConfirm }: { memberId: string; date: DateStr; 
   return (
     <div className="space-y-4 pb-2">
       <PricingFields form={form} onChange={setForm} lines={lines} idPrefix="buy" />
+      <SheetFooter>
       <Button
         size="lg"
         className="w-full"
@@ -57,6 +58,7 @@ function Body({ memberId, date, onConfirm }: { memberId: string; date: DateStr; 
       >
         기록하기
       </Button>
+      </SheetFooter>
     </div>
   )
 }

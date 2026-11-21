@@ -10,7 +10,7 @@ import { OrderHistory } from '@/components/order-card'
 import { SwipeRow } from '@/components/swipe-row'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
-import { Sheet } from '@/components/ui/sheet'
+import { Sheet, SheetFooter } from '@/components/ui/sheet'
 import { memberStyle } from '@/lib/members'
 import { formatShort, monthKey, weekdayKo } from '@/logic/dates'
 import { diffPrices, warnsOnClear } from '@/logic/fairness'
@@ -274,7 +274,7 @@ function EditorBody({
           />
         </div>
       )}
-      <div className="flex gap-2 pt-1">
+      <SheetFooter className="flex gap-2">
         {existing && (
           <Button
             variant="danger"
@@ -311,7 +311,7 @@ function EditorBody({
         >
           저장
         </Button>
-      </div>
+      </SheetFooter>
 
       <Sheet open={warnClear} onOpenChange={setWarnClear} title="금액을 지울까요?" description="차액 계산에서 빠져 당번 순서가 달라질 수 있어요">
         <div className="flex gap-2 pt-2">
