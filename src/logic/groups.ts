@@ -1,5 +1,6 @@
 import type { AppData, Absence, CoffeeData, DateStr, Group, GroupConfig, GroupView, Member, Schedule, Settings, Template } from '../types'
 import { normalizeSchedule } from './schedule'
+import { themeOf } from './themes'
 import { configOf, presetById } from './templates'
 
 /** 그룹 이모지 선택지 */
@@ -170,6 +171,12 @@ export const TERMS: Record<Template, Terms> = {
  * 다른 버튼 문구는 일반 용어에 그 문구를 끼워 만든다.
  */
 export function termsOf(c: GroupConfig): Terms {
+  const themed = themeOf(c.themeId).copy // 커피 테마는 기존 문구 그대로(null)
+  const base = baseTerms(c)
+  return themed ? { ...base, ...themed } : base
+}
+
+function baseTerms(c: GroupConfig): Terms {
   if (c.presetId === 'coffee') return TERMS.coffee
   const a = c.actionLabel
   if (a === '했어요') return TERMS.general

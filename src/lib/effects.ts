@@ -1,7 +1,7 @@
 import confetti from 'canvas-confetti'
 
-// 커피콩 색: 에스프레소 → 모카 → 카라멜 → 라떼
-const BEAN_COLORS = ['#3e2723', '#5d4037', '#8d6e63', '#6b3f2a', '#e08e45', '#d7c4a8']
+import { themeOf } from '@/logic/themes'
+import type { ThemeId } from '@/types'
 
 let bean: confetti.Shape | undefined
 function beanShape() {
@@ -12,16 +12,32 @@ function beanShape() {
   return bean
 }
 
-/** 요소 위치에서 커피콩 컨페티 발사 (reduced-motion이면 아무것도 안 함) */
-export function beanConfetti(el?: HTMLElement | null) {
+const textShapes = new Map<string, confetti.Shape>()
+function emojiShape(text: string) {
+  let s = textShapes.get(text)
+  if (!s) {
+    s = confetti.shapeFromText({ text, scalar: 2 })
+    textShapes.set(text, s)
+  }
+  return s
+}
+
+/**
+ * 요소 위치에서 테마별 컨페티 발사 (reduced-motion이면 아무것도 안 함).
+ * 커피는 지금의 커피콩 그대로, 나머지는 테마의 색과 모양(+이모지).
+ */
+export function themeConfetti(themeId: ThemeId, el?: HTMLElement | null) {
+  const t = themeOf(themeId).confetti
   const rect = el?.getBoundingClientRect()
   const origin = rect
     ? { x: (rect.left + rect.width / 2) / window.innerWidth, y: (rect.top + rect.height / 2) / window.innerHeight }
     : { x: 0.5, y: 0.7 }
+  const shapes: confetti.Shape[] =
+    t.shape === 'bean' ? [beanShape(), 'circle'] : t.text ? [emojiShape(t.text), t.shape] : [t.shape, 'circle']
   const base = {
     origin,
-    colors: BEAN_COLORS,
-    shapes: [beanShape(), 'circle'] as confetti.Shape[],
+    colors: t.colors,
+    shapes,
     scalar: 1.1,
     ticks: 140,
     zIndex: 100,

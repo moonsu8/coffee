@@ -3,7 +3,7 @@ import { TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, PageHeader, SectionTitle, Segmented } from '@/components/common'
-import { EmptyCup } from '@/components/illustrations'
+import { EmptyArt } from '@/components/theme-art'
 import { memberStyle } from '@/lib/members'
 import { signedWon } from '@/lib/format'
 import { formatMD, monthKey } from '@/logic/dates'
@@ -36,11 +36,11 @@ export function StatsScreen() {
       <div className="space-y-5 px-5">
         {/* 커피왕 */}
         <section
-          className="relative overflow-hidden rounded-card bg-espresso p-6 text-[#faf6f0] shadow-pop"
-          style={{ background: 'radial-gradient(100% 90% at 100% 0%, var(--hero-glow), transparent 60%), var(--espresso)', ['--surface' as string]: '#fffdf9' }}
+          className="relative overflow-hidden rounded-card bg-espresso p-6 text-hero-ink shadow-pop"
+          style={{ background: 'radial-gradient(100% 90% at 100% 0%, var(--hero-glow), transparent 60%), var(--espresso)', ['--surface' as string]: 'var(--hero-surface)' }}
         >
-          <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">{terms.kingEyebrow}</p>
-          <h2 className="mt-1 text-[17px] font-bold text-[#d7c4a8]">{terms.kingTitle}</h2>
+          <p className="text-[11px] font-bold tracking-[0.22em] text-hero-accent">{terms.kingEyebrow}</p>
+          <h2 className="mt-1 text-[17px] font-bold text-hero-ink-2">{terms.kingTitle}</h2>
           {kings.length > 0 ? (
             <div className="mt-4 flex items-center gap-4">
               <div className="flex -space-x-3">
@@ -54,14 +54,14 @@ export function StatsScreen() {
                 <p className="truncate text-[32px] leading-tight font-black tracking-tight">
                   {kings.map((k) => k.name).join(', ')}
                 </p>
-                <p className="text-[15px] text-[#d7c4a8]">
+                <p className="text-[15px] text-hero-ink-2">
                   {kings.length > 1 ? '공동 1위 · ' : ''}
                   {terms.kingCount(monthMax)}
                 </p>
               </div>
             </div>
           ) : (
-            <p className="mt-4 text-[15px] leading-relaxed text-[#d7c4a8]">{terms.kingEmpty}</p>
+            <p className="mt-4 text-[15px] leading-relaxed text-hero-ink-2">{terms.kingEmpty}</p>
           )}
         </section>
 
@@ -82,7 +82,7 @@ export function StatsScreen() {
             {terms.countTitle}
           </SectionTitle>
           {total === 0 ? (
-            <EmptyState illustration={<EmptyCup />} title="아직 통계가 없어요" body={terms.statsEmpty} />
+            <EmptyState illustration={<EmptyArt />} title="아직 통계가 없어요" body={terms.statsEmpty} />
           ) : (
             <ul className="space-y-3.5">
               {rows.map(({ m, n }, i) => (
@@ -147,7 +147,7 @@ function BalanceCard({ range, month }: { range: Range; month: string }) {
 
       {fair.counted === 0 ? (
         <EmptyState
-          illustration={<EmptyCup />}
+          illustration={<EmptyArt />}
           title="아직 금액 기록이 없어요"
           body="[샀어요]에서 금액을 적으면 누가 얼마나 냈는지 여기에 정리돼요."
         />

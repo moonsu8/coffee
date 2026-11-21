@@ -79,7 +79,7 @@ export function MonthGrid({ month, onSelect, renderDay, dayClassName, dayLabel, 
               <span
                 className={cn(
                   'grid size-6 place-items-center rounded-full text-[14px] leading-none',
-                  isToday && 'bg-espresso font-bold text-[#faf6f0]',
+                  isToday && 'bg-espresso font-bold text-hero-ink',
                 )}
               >
                 {Number(date.slice(8))}

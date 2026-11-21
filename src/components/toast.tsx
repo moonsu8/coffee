@@ -46,7 +46,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 12, scale: 0.98 }}
                 transition={{ type: 'spring', damping: 26, stiffness: 380 }}
-                className="pointer-events-auto relative flex items-center gap-3 overflow-hidden rounded-2xl bg-espresso py-2 pr-2 pl-4 text-[#faf6f0] shadow-pop"
+                className="pointer-events-auto relative flex items-center gap-3 overflow-hidden rounded-2xl bg-espresso py-2 pr-2 pl-4 text-hero-ink shadow-pop"
               >
                 <span className="grid size-6 shrink-0 place-items-center rounded-full bg-caramel text-on-caramel">
                   <Check size={14} strokeWidth={3} />
@@ -58,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       item.onAction?.()
                       dismiss()
                     }}
-                    className="min-h-11 rounded-xl px-4 text-[15px] font-bold text-[#f0b27a] hover:bg-white/10"
+                    className="min-h-11 rounded-xl px-4 text-[15px] font-bold text-hero-accent hover:bg-white/10"
                   >
                     {item.actionLabel}
                   </button>

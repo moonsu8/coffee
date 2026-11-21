@@ -27,6 +27,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 테스트 `nextBuyer.test.ts` 27개: 휴가자 건너뛰기, 복귀 후 우선순위, 대신 산 경우, 신규 멤버, 주말/휴일, 예측, 공유 텍스트.
 
 ## UI 규칙
+- **그룹 테마**(데이터 구조 변경 없음, `config.themeId`): `logic/themes.ts`가 테마 8개(coffee, lunch, notes, stage, clean, recycle, dishes, walk)의 라이트·다크 팔레트·컨페티·빈 화면 문구를 가진다. 색은 아래 CSS 변수 토큰으로 내려가고(`paletteVars`), 앱 최상위(html)의 `data-theme`으로 갈아 끼운다. **커피 테마는 `index.css`의 값 그대로**(기본값)이고 나머지 7개 테마의 `:root[data-theme=…]` 블록은 `main.tsx`가 `themeCss()`로 주입한다(`lib/theme.ts`). 토큰 이름은 기존 그대로(`--caramel`=포인트 배경, `--on-caramel`, `--caramel-ink`, `--espresso`=히어로의 진한 면, `--latte`)이고 `--accent`/`--accent-ink`/`--text`는 별칭이다. 히어로 위 글자는 `text-hero-ink`·`text-hero-ink-2`·`text-hero-accent`(하드코딩 hex 금지). 바뀌는 것: 배경·표면·포인트 색·히어로 일러스트(`components/theme-art.tsx`)·빈 화면 문구·컨페티(`lib/effects.ts`의 `themeConfetti`)·meta theme-color. 바뀌지 않는 것: 레이아웃·폰트·멤버 아바타 색·휴가(민트)/경고(danger) 같은 의미 색. 직접 만들기는 목록에서 테마를 고르기만 한다(자유 색상 없음). 그룹 전환 시 `applyTheme`가 `data-theme`·meta를 바꾸고 300ms 색 전환(`.theme-fade`, reduced-motion이면 즉시), 마지막 테마는 기기별 키 `coffee-duty:theme`에 저장해 첫 화면부터 적용한다. 테스트 `themes.test.ts`가 **모든 테마 × 라이트/다크의 글자 대비 AA(4.5:1)**와 **커피 팔레트 = index.css 값**을 고정한다. 새 테마·색을 추가하면 이 테스트를 통과시킨다. `/design`(또는 `#/design`)은 **개발 서버 전용** 확인 페이지(`src/design/`)로 모든 테마를 라이트·다크 나란히 보여준다(배포본에는 번들되지 않음).
 - 색상 토큰은 `src/index.css`의 CSS 변수(라이트/다크는 `prefers-color-scheme`). 카라멜(#E08E45)은 **배경 전용**, 그 위 글자는 `text-on-caramel`; 카라멜 계열 글자는 `text-caramel-ink`. 민트는 휴가 전용(멤버 색상 팔레트에서 제외).
 - 멤버 표시는 항상 `components/avatar.tsx` 사용(색+이모지, `absent`면 흐림+🏖️). 색상/이모지 기본값은 `lib/members.ts`.
 - 카드 `rounded-card`(24px) + `shadow-card`(갈색 톤). 터치 영역 최소 44px. 숫자는 body 전체에 tabular-nums.
@@ -105,8 +106,9 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 222개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 테스트 246개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `themes`(대비·커피 불변), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
 - 시트 터치 스크롤은 설치된 Chrome에 실제 터치 이벤트(`touchStart/Move/End`)를 보내는 방식(360x800·다크·`playwright-core`를 `--no-save`로 임시 설치)으로 확인했다: 수정 전 스와이프 0px·저장 버튼 화면 밖 → 수정 후 스크롤·저장 버튼 고정 노출. `synthesizeScrollGesture`는 이 환경에서 스크롤을 일으키지 못하므로 쓰지 말고, 항상 홈 화면 같은 대조군으로 도구가 동작하는지 먼저 확인한다.
+- 커피 화면 불변 확인: 테마 도입 전후로 홈·기록·휴가·통계·설정·기록 추가 시트를 라이트·다크(375x800, 날짜 고정, reduced-motion)로 캡처해 PIL로 비교 → 12장 모두 픽셀 차이 0. 새 테마의 실제 렌더링은 `/design`과 그룹 전환(Chrome 에뮬레이션)으로 확인했고 실제 기기에서는 확인하지 못했다.
 - **미확인**: 그룹 전환기·그룹 관리 카드·휴가 "모든 그룹에 적용"·주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
 
 ## 배포 (GitHub Pages)

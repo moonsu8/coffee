@@ -3,7 +3,7 @@ import { CalendarDays, List, Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, MemberPicker, PageHeader, Segmented } from '@/components/common'
-import { EmptyCup } from '@/components/illustrations'
+import { EmptyArt } from '@/components/theme-art'
 import { MonthGrid, MonthNav } from '@/components/month-grid'
 import { PricingFields } from '@/components/pricing-fields'
 import { OrderHistory } from '@/components/order-card'
@@ -102,7 +102,7 @@ export function HistoryScreen() {
               {monthPurchases.length === 0 ? (
                 <Card>
                   <EmptyState
-                    illustration={<EmptyCup />}
+                    illustration={<EmptyArt />}
                     title="이 달엔 아직 기록이 없어요"
                     body={terms.emptyHistory}
                     action={<Button onClick={() => setEditing(today)}>오늘 기록하기</Button>}

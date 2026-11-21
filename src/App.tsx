@@ -1,13 +1,14 @@
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import { BarChart3, CalendarDays, Coffee, Settings, TreePalm, type LucideIcon } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { ToastProvider } from '@/components/toast'
 import { AbsencesScreen } from '@/screens/absences'
 import { HistoryScreen } from '@/screens/history'
 import { HomeScreen } from '@/screens/home'
 import { SettingsScreen } from '@/screens/settings'
 import { StatsScreen } from '@/screens/stats'
-import { StoreProvider } from '@/store/store'
+import { applyTheme } from '@/lib/theme'
+import { StoreProvider, useStore } from '@/store/store'
 import { cn } from '@/lib/utils'
 
 const TABS: { id: string; label: string; icon: LucideIcon }[] = [
@@ -22,6 +23,17 @@ const slide = {
   enter: (dir: number) => ({ opacity: 0, x: dir * 36 }),
   center: { opacity: 1, x: 0 },
   exit: (dir: number) => ({ opacity: 0, x: dir * -36 }),
+}
+
+/** 현재 그룹의 테마를 앱 최상위(data-theme)와 meta theme-color에 반영한다 */
+function ThemeSync() {
+  const { data } = useStore()
+  const first = useRef(true)
+  useLayoutEffect(() => {
+    applyTheme(data.config.themeId, !first.current)
+    first.current = false
+  }, [data.config.themeId])
+  return null
 }
 
 export default function App() {
@@ -39,6 +51,7 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <StoreProvider>
+        <ThemeSync />
         {/* 모바일은 전체 화면, 데스크탑은 가운데 정렬된 카드형 프레임 */}
         <div className="md:flex md:h-full md:items-center md:justify-center">
           <div className="relative mx-auto flex h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-bg md:h-[min(880px,calc(100dvh-48px))] md:rounded-[36px] md:border md:border-line md:shadow-pop">

@@ -3,7 +3,8 @@ import { Check, Copy, RotateCcw, UserRoundPen } from 'lucide-react'
 import { useRef, useState, type CSSProperties } from 'react'
 import { Avatar } from '@/components/avatar'
 import { Card, EmptyState, SectionTitle } from '@/components/common'
-import { CoffeeCup, EmptyCup, LogoMark } from '@/components/illustrations'
+import { LogoMark } from '@/components/illustrations'
+import { EmptyArt, HeroArt } from '@/components/theme-art'
 import { GroupSwitcher } from '@/components/group-switcher'
 import { InstallBanner } from '@/components/install'
 import { OrderCard } from '@/components/order-card'
@@ -12,7 +13,7 @@ import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/sheet'
 import { MemberPicker } from '@/components/common'
-import { copyText, beanConfetti } from '@/lib/effects'
+import { copyText, themeConfetti } from '@/lib/effects'
 import { cn, haptic } from '@/lib/utils'
 import { addDays, diffDays, formatMD, formatShort, parseDate, weekdayKo } from '@/logic/dates'
 import {
@@ -30,7 +31,7 @@ import type { Pricing } from '@/types'
 import { useStore } from '@/store/store'
 
 // 히어로는 항상 에스프레소 배경이라 아바타 틴트는 밝은 크림 기준으로 계산
-const HERO_VARS = { '--surface': '#fffdf9' } as CSSProperties
+const HERO_VARS = { '--surface': 'var(--hero-surface)' } as CSSProperties
 
 function relativeDays(from: string, to: string): string {
   const n = diffDays(to, from)
@@ -51,7 +52,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
       <div className="px-5 pt-8">
         <GroupSwitcher />
         <EmptyState
-          illustration={<EmptyCup />}
+          illustration={<EmptyArt />}
           title="아직 멤버가 없어요"
           body={terms.emptyMembers}
           action={<Button onClick={goSettings}>멤버 추가하러 가기</Button>}
@@ -79,7 +80,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
     savePrices(entries)
     const undo = savePurchase({ date: today, memberId, ...(pricing ? { pricing } : {}) })
     haptic([18, 40, 18])
-    beanConfetti(fromButton ? btnRef.current : null)
+    themeConfetti(data.config.themeId, fromButton ? btnRef.current : null)
     if (fromButton) pulse.start({ scale: [1, 0.9, 1.07, 1], transition: { duration: 0.45 } })
     toast({ message: `${m?.name ?? ''}님 기록했어요`, actionLabel: '되돌리기', onAction: undo })
   }
@@ -124,31 +125,31 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           ...HERO_VARS,
           background: 'radial-gradient(120% 80% at 85% 0%, var(--hero-glow), transparent 60%), var(--espresso)',
         }}
-        className="relative flex min-h-[47dvh] flex-col overflow-hidden rounded-card p-6 text-[#faf6f0] shadow-pop md:min-h-[420px]"
+        className="relative flex min-h-[47dvh] flex-col overflow-hidden rounded-card p-6 text-hero-ink shadow-pop md:min-h-[420px]"
       >
         {/* 메뉴판 안쪽 테두리 */}
-        <div aria-hidden className="pointer-events-none absolute inset-2.5 rounded-[18px] border border-dashed border-[#d7c4a8]/25" />
+        <div aria-hidden className="pointer-events-none absolute inset-2.5 rounded-[18px] border border-dashed border-hero-ink-2/25" />
 
         <div className="relative flex items-start justify-between">
           <div>
-            <p className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">{terms.heroEyebrow}</p>
-            <p className="mt-1 text-[15px] font-semibold text-[#d7c4a8]">
+            <p className="text-[11px] font-bold tracking-[0.22em] text-hero-accent">{terms.heroEyebrow}</p>
+            <p className="mt-1 text-[15px] font-semibold text-hero-ink-2">
               {isToday ? '오늘의 당번' : `${formatShort(target)} 당번`}
             </p>
           </div>
-          <CoffeeCup className="-mt-1 -mr-1 w-[118px]" steaming={!done && !!buyer} />
+          <HeroArt className="-mt-1 -mr-1 w-[118px]" steaming={!done && !!buyer} />
         </div>
 
         <div className="relative mt-auto pt-4">
           {!isToday && (
-            <p className="mb-2 inline-block rounded-full bg-white/10 px-3 py-1 text-[13px] font-semibold text-[#d7c4a8]">
+            <p className="mb-2 inline-block rounded-full bg-white/10 px-3 py-1 text-[13px] font-semibold text-hero-ink-2">
               오늘은 쉬는 날이에요
             </p>
           )}
           {buyer ? (
             <>
               <h2 className={cn('font-black leading-[1.05] tracking-tight break-keep', nameSize)}>{buyer.name}</h2>
-              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-[#d7c4a8]">
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-hero-ink-2">
                 {done ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-caramel px-3 py-1 text-[13px] font-bold text-on-caramel">
                     <Check size={14} strokeWidth={3} /> {terms.doneBadge}
@@ -160,20 +161,20 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
                     : terms.never}
                 </span>
               </div>
-              {todayPurchase?.memo && <p className="mt-1 text-sm text-[#d7c4a8]/80">“{todayPurchase.memo}”</p>}
+              {todayPurchase?.memo && <p className="mt-1 text-sm text-hero-ink-2/80">“{todayPurchase.memo}”</p>}
             </>
           ) : (
             <>
               <h2 className="text-4xl leading-tight font-black tracking-tight">당번이 없어요</h2>
-              <p className="mt-2 text-[15px] text-[#d7c4a8]">모두 휴가 중이에요. 푹 쉬고 오세요.</p>
+              <p className="mt-2 text-[15px] text-hero-ink-2">모두 휴가 중이에요. 푹 쉬고 오세요.</p>
             </>
           )}
 
           {/* 메뉴판식 점선 구분 */}
-          <div aria-hidden className="my-5 border-t-2 border-dotted border-[#d7c4a8]/35" />
+          <div aria-hidden className="my-5 border-t-2 border-dotted border-hero-ink-2/35" />
 
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold tracking-[0.22em] text-[#f0b27a]">NEXT</span>
+            <span className="text-[11px] font-bold tracking-[0.22em] text-hero-accent">NEXT</span>
             <ul className="flex gap-4">
               {queue.map((r, i) => (
                 <li key={r.member.id} className="flex w-[58px] flex-col items-center gap-1">
@@ -192,12 +193,12 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
             <div className="mt-5">
               {done ? (
                 <div className="flex gap-2">
-                  <Button variant="outline" className="flex-1 border-white/20 bg-white/10 text-[#faf6f0] hover:bg-white/15" onClick={() => setSheetOpen(true)}>
+                  <Button variant="outline" className="flex-1 border-white/20 bg-white/10 text-hero-ink hover:bg-white/15" onClick={() => setSheetOpen(true)}>
                     <UserRoundPen size={18} /> {terms.changeBuyer}
                   </Button>
                   <Button
                     variant="outline"
-                    className="flex-1 border-white/20 bg-white/10 text-[#faf6f0] hover:bg-white/15"
+                    className="flex-1 border-white/20 bg-white/10 text-hero-ink hover:bg-white/15"
                     onClick={() => {
                       const undo = removePurchase(today)
                       toast({ message: '기록을 취소했어요', actionLabel: '되돌리기', onAction: undo })
@@ -220,7 +221,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
                   </motion.div>
                   <button
                     onClick={() => setSheetOpen(true)}
-                    className="mt-1 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl text-[15px] font-semibold text-[#d7c4a8] underline decoration-[#d7c4a8]/40 underline-offset-4 hover:bg-white/5"
+                    className="mt-1 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl text-[15px] font-semibold text-hero-ink-2 underline decoration-hero-ink-2/40 underline-offset-4 hover:bg-white/5"
                   >
                     {terms.otherBtn}
                   </button>

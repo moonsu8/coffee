@@ -12,7 +12,7 @@ import { Sheet } from './ui/sheet'
 function Step({ n, icon: Icon, children }: { n: number; icon: LucideIcon; children: ReactNode }) {
   return (
     <li className="flex items-center gap-3.5 rounded-2xl bg-surface-2 p-3.5">
-      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-espresso text-sm font-extrabold text-[#faf6f0]">
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-espresso text-sm font-extrabold text-hero-ink">
         {n}
       </span>
       <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface text-caramel-ink shadow-card">

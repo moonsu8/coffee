@@ -17,12 +17,22 @@
   --caramel-ink: #8f4e14;
   --on-caramel: #2b1810;
   --latte: #d7c4a8;
+  /* 히어로(진한 면) 위 글자·포인트·아바타 테두리용 밝은 면 */
+  --hero-ink: #faf6f0;
+  --hero-ink-2: #d7c4a8;
+  --hero-accent: #f0b27a;
+  --hero-surface: #fffdf9;
+  --accent-rgb: 224 142 69;
   --mint: #8fbfa8;
   --mint-ink: #2d6652;
   --danger: #b0402b;
   --shadow-card: 0 10px 28px -10px rgb(62 39 35 / 0.14), 0 1px 3px rgb(62 39 35 / 0.06);
   --shadow-pop: 0 18px 40px -12px rgb(62 39 35 / 0.28);
   --hero-glow: rgb(224 142 69 / 0.28);
+  /* 별칭: 그룹 테마가 바꿔 끼우는 토큰 이름 (아래 :root[data-theme] 블록은 main.tsx가 주입) */
+  --accent: var(--caramel);
+  --accent-ink: var(--caramel-ink);
+  --text: var(--ink);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -55,6 +65,10 @@
   --color-caramel-ink: var(--caramel-ink);
   --color-on-caramel: var(--on-caramel);
   --color-latte: var(--latte);
+  --color-hero-ink: var(--hero-ink);
+  --color-hero-ink-2: var(--hero-ink-2);
+  --color-hero-accent: var(--hero-accent);
+  --color-hero-surface: var(--hero-surface);
   --color-mint: var(--mint);
   --color-mint-ink: var(--mint-ink);
   --color-danger: var(--danger);
@@ -83,7 +97,7 @@ body {
 @media (min-width: 768px) {
   body {
     background:
-      radial-gradient(900px 500px at 15% 0%, rgb(224 142 69 / 0.1), transparent 60%),
+      radial-gradient(900px 500px at 15% 0%, rgb(var(--accent-rgb) / 0.1), transparent 60%),
       radial-gradient(800px 500px at 100% 100%, rgb(143 191 168 / 0.12), transparent 60%), var(--surface-2);
   }
 }
@@ -103,6 +117,19 @@ button {
 }
 .scroll-clean::-webkit-scrollbar {
   display: none;
+}
+
+/* 그룹 전환 시 색이 부드럽게 바뀐다 (main.tsx의 applyTheme가 잠깐 붙였다 뗀다) */
+.theme-fade,
+.theme-fade *,
+.theme-fade *::before,
+.theme-fade *::after {
+  transition:
+    background-color 300ms ease,
+    color 300ms ease,
+    border-color 300ms ease,
+    fill 300ms ease,
+    stroke 300ms ease !important;
 }
 
 /* 커피잔 김 */
@@ -135,10 +162,10 @@ button {
 @keyframes breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(224 142 69 / 0.55);
+    box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / 0.55);
   }
   50% {
-    box-shadow: 0 0 0 10px rgb(224 142 69 / 0);
+    box-shadow: 0 0 0 10px rgb(var(--accent-rgb) / 0);
   }
 }
 .breathe {
@@ -146,6 +173,10 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .theme-fade,
+  .theme-fade * {
+    transition: none !important;
+  }
   *,
   *::before,
   *::after {

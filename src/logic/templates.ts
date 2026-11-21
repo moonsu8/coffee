@@ -1,17 +1,5 @@
 import type { GroupConfig, Schedule, ThemeId } from '../types'
 
-/** 테마 이름(목록에서 고르는 용도) */
-export const THEME_LABELS: Record<ThemeId, { label: string; emoji: string }> = {
-  coffee: { label: '커피', emoji: '☕' },
-  lunch: { label: '점심', emoji: '🍱' },
-  notes: { label: '회의록', emoji: '📝' },
-  stage: { label: '무대', emoji: '🎤' },
-  clean: { label: '청소', emoji: '🧹' },
-  recycle: { label: '분리수거', emoji: '♻️' },
-  dishes: { label: '설거지', emoji: '🍽️' },
-  walk: { label: '산책', emoji: '🚶' },
-}
-
 /**
  * 템플릿 프리셋(코드 상수). 그룹을 만들 때 값이 그룹에 복사되므로
  * 여기를 나중에 바꿔도 이미 만든 그룹은 변하지 않는다.
