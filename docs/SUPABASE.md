@@ -40,6 +40,7 @@
 | `supabase/migrations/0001_init.sql` | 테이블, RLS, RPC, Realtime | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0002_import_keep_ids.sql` | `import_group`이 uuid 멤버 id를 유지 | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0003_group_snapshot.sql` | `get_group_snapshot`(그룹 전체를 한 번에 읽기) | 테스트·운영 프로젝트 모두 |
+| `supabase/migrations/0004_apply_group_ops.sql` | `groups.rev`(충돌 감지) + `apply_group_ops`(그룹장 쓰기를 한 트랜잭션으로) | 테스트·운영 프로젝트 모두 |
 | `supabase/test-only/sentinel.sql` | "테스트 프로젝트" 표식(`is_test_project()`) | **테스트 프로젝트에만** |
 | `tests/rls/*` | RLS·RPC·왕복·스냅샷 검증 (`npm run test:rls`) | 테스트 프로젝트 |
 | `scripts/seed-test.ts` | 샘플 그룹 + 초대 코드 넣기 (`npm run seed:test`) | 테스트 프로젝트 |
@@ -49,7 +50,8 @@
 1. `0001_init.sql`
 2. `0002_import_keep_ids.sql`
 3. `0003_group_snapshot.sql`
-4. (테스트 프로젝트만) `test-only/sentinel.sql`
+4. `0004_apply_group_ops.sql`
+5. (테스트 프로젝트만) `test-only/sentinel.sql`
 
 새 마이그레이션이 생기면 번호 순서대로 이어서 적용한다. 이미 적용한 파일은 다시 Run하지 않는다(`0001`은 다시 돌리면 "already exists" 오류가 난다).
 적용 뒤에 함수가 안 보이면 SQL Editor에서 `notify pgrst, 'reload schema';` 를 한 번 실행한다.
