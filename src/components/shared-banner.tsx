@@ -1,7 +1,10 @@
-import { Cloud, Eye, RefreshCw, TriangleAlert, X } from 'lucide-react'
+import { Cloud, CopyX, Eye, RefreshCw, TriangleAlert, X } from 'lucide-react'
+import { useState } from 'react'
 import { formatSyncTime } from '@/remote/format'
 import { useRemote } from '@/remote/provider'
 import { useStore } from '@/store/store'
+import { Button } from './ui/button'
+import { Sheet, SheetFooter } from './ui/sheet'
 
 /**
  * 서버(공유) 그룹을 보는 중일 때만 화면 맨 위에 뜨는 안내.
@@ -11,6 +14,7 @@ import { useStore } from '@/store/store'
 export function SharedBanner() {
   const { access } = useStore()
   const remote = useRemote()
+  if (access.staleCopy) return <StaleCopyBanner />
   if (access.kind !== 'remote') return null
   const at = access.lastSyncedAt ? formatSyncTime(access.lastSyncedAt) : '-'
   const owner = access.role === 'owner'
@@ -54,5 +58,53 @@ export function SharedBanner() {
         </button>
       )}
     </div>
+  )
+}
+
+/**
+ * 서버로 옮긴 그룹의 "이전 사본"(서버 그룹이 지금 안 보이는 내 기기 그룹).
+ * 기본은 수정할 수 없고, 경고를 확인해야 이번 실행 동안 수정할 수 있다.
+ */
+function StaleCopyBanner() {
+  const { access, data, unlockCopy } = useStore()
+  const [ask, setAsk] = useState(false)
+  return (
+    <>
+      <div role="status" className="flex shrink-0 items-start gap-2 border-b border-line bg-surface-2 px-4 py-2 text-[13px] font-semibold leading-snug text-ink-2">
+        <span className="mt-1.5">
+          <CopyX size={16} aria-hidden className="shrink-0" />
+        </span>
+        <span className="min-w-0 flex-1 py-1">
+          {access.canWrite
+            ? '서버로 옮긴 그룹의 이전 사본 · 여기서 고친 내용은 서버 그룹에 반영되지 않아요'
+            : '서버로 옮긴 그룹의 이전 사본이에요. 서버 그룹은 로그인하면 볼 수 있어요'}
+        </span>
+        {!access.canWrite && (
+          <Button size="sm" variant="soft" onClick={() => setAsk(true)}>
+            수정하기
+          </Button>
+        )}
+      </div>
+      <Sheet open={ask} onOpenChange={setAsk} title="이전 사본을 수정할까요?" description="이 그룹은 서버로 옮긴 그룹의 이전 사본이에요">
+        <p className="mb-2 rounded-2xl bg-surface-2 p-3 text-[13px] leading-relaxed text-ink-2">
+          여기서 기록하거나 고쳐도 <b>서버 그룹에는 반영되지 않아요.</b> 그룹원은 서버 그룹을 보기 때문에, 이 사본에만 남은 기록은 따로 어긋나요. 서버 그룹에서 수정하려면 로그인해서 서버 그룹을 열어 주세요.
+        </p>
+        <SheetFooter className="flex gap-2">
+          <Button variant="soft" size="lg" className="flex-1" onClick={() => setAsk(false)}>
+            취소
+          </Button>
+          <Button
+            size="lg"
+            className="flex-1"
+            onClick={() => {
+              unlockCopy(data.groupId)
+              setAsk(false)
+            }}
+          >
+            그래도 수정하기
+          </Button>
+        </SheetFooter>
+      </Sheet>
+    </>
   )
 }

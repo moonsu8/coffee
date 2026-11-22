@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { CloudUpload, Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { GROUP_EMOJIS } from '@/logic/groups'
 import { scheduleDays, scheduleLabel, WEEKDAY_NUMS } from '@/logic/schedule'
@@ -7,6 +7,8 @@ import { configOf, CUSTOM_PRESET_ID, PRESETS, presetById, type TemplatePreset } 
 import { THEME_LABELS } from '@/logic/themes'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/store'
+import { useRemote } from '@/remote/provider'
+import { ShareSheet } from './share-sheet'
 import { THEME_IDS, type Group, type Schedule, type ThemeId } from '@/types'
 import { Card, SectionTitle } from './common'
 import { useToast } from './toast'
@@ -17,8 +19,10 @@ const presetLabel = (g: Group) => (g.config.presetId === CUSTOM_PRESET_ID ? '직
 
 /** 그룹 관리: 추가 · 이름/이모지 변경 · 삭제 (마지막 하나는 삭제할 수 없다) */
 export function GroupsCard() {
-  const { groups, data, switchGroup, addGroup, updateGroup, removeGroup } = useStore()
+  const { groups, data, switchGroup, addGroup, updateGroup, removeGroup, copyStatusOf } = useStore()
+  const remote = useRemote()
   const toast = useToast()
+  const [sharing, setSharing] = useState<Group | null>(null)
   const [form, setForm] = useState<null | { mode: 'add' } | { mode: 'edit'; group: Group }>(null)
   const [deleting, setDeleting] = useState<Group | null>(null)
   const lastDeleting = useRef<Group | null>(null)
@@ -39,6 +43,8 @@ export function GroupsCard() {
       <ul className="space-y-2">
         {groups.map((g) => {
           const active = g.id === data.groupId
+          const status = copyStatusOf(g.id)
+          const remoteId = remote.links[g.id]?.remoteId
           return (
             <li key={g.id} className="flex items-center gap-2 rounded-[20px] bg-surface-2 pr-2">
               <button
@@ -54,19 +60,38 @@ export function GroupsCard() {
                   <span className="block text-xs text-ink-2">
                     {presetLabel(g)} · {scheduleLabel(g.schedule)} · 멤버 {g.members.length}명 · 기록 {g.records.length}건
                   </span>
+                  {status === 'moved' && <span className="block text-xs font-semibold text-caramel-ink">서버로 옮김 · 서버 그룹이 보이는 동안 숨겨져요</span>}
+                  {status === 'stale' && <span className="block text-xs font-semibold text-caramel-ink">서버로 옮긴 그룹의 이전 사본</span>}
                 </span>
               </button>
-              {active ? (
+              {status === 'moved' ? (
+                remoteId && (
+                  <Button size="sm" variant="outline" onClick={() => switchGroup(remoteId)}>
+                    서버 그룹 보기
+                  </Button>
+                )
+              ) : active ? (
                 <span className="shrink-0 rounded-full bg-caramel/25 px-2.5 py-1 text-xs font-bold">보는 중</span>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => switchGroup(g.id)}>
                   보기
                 </Button>
               )}
+              {remote.enabled && (status === null || status === 'pending') && (
+                <button
+                  onClick={() => setSharing(g)}
+                  aria-label={`${g.name} 그룹을 서버로 옮기기`}
+                  className="grid size-11 shrink-0 place-items-center rounded-full text-ink-2 hover:bg-black/5"
+                >
+                  <CloudUpload size={19} />
+                </button>
+              )}
             </li>
           )
         })}
       </ul>
+
+      <ShareSheet group={sharing} onClose={() => setSharing(null)} />
 
       <Sheet
         open={form !== null}

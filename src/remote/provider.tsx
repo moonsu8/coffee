@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { applyOps, diffGroups, rowsToGroup } from '../logic/remote-map'
+import { readLinks, writeLinks, type Links } from './links'
+import { shareLocalGroup, type ShareResult } from './share'
 import type { Group } from '../types'
 import {
   AGE_PENDING_KEY,
@@ -8,6 +10,7 @@ import {
   confirmAge,
   currentUser,
   fetchGroupRows,
+  importGroupRpc,
   isNetworkError,
   leaveGroup,
   listMemberships,
@@ -52,6 +55,10 @@ export interface RemoteState {
   refresh: () => Promise<void>
   /** 최신 그룹(낙관적 반영 포함). 스토어의 되돌리기가 옛 값을 쓰지 않게 한다 */
   getGroup: (groupId: string) => Group | undefined
+  /** 내 기기 그룹 ↔ 서버로 옮긴 그룹 연결 정보 (기기별 키) */
+  links: Links
+  /** 내 기기 그룹을 서버로 옮긴다 (백업 → 올리기 → 서버에서 다시 읽어 대조). Google 로그인한 사용자만 */
+  shareGroup: (group: Group, backupJson: string) => Promise<ShareResult>
   /** 그룹장 쓰기: 변경 함수를 최신 그룹에 적용해 서버에 보낸다. 쓸 수 없으면 false */
   commitGroup: (groupId: string, mutate: (g: Group) => Group) => boolean
   join: (code: string) => Promise<JoinResult>
@@ -71,6 +78,8 @@ const OFF: RemoteState = {
   dismissWrite: () => {},
   refresh: async () => {},
   getGroup: () => undefined,
+  links: {},
+  shareGroup: async () => ({ ok: false, reason: 'import', message: '공유 기능을 쓸 수 없어요' }),
   commitGroup: () => false,
   join: async () => ({ ok: false, message: '공유 기능을 쓸 수 없어요' }),
   signInGoogle: async () => ({ ok: false }),
@@ -131,6 +140,10 @@ function Inner({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false))
   const [refreshing, setRefreshing] = useState(false)
   const [write, setWrite] = useState<WriteStatus>({ state: 'idle' })
+  const [links, setLinksState] = useState<Links>(() => readLinks())
+  const linksRef = useRef(links)
+  const userRef = useRef<RemoteUser | null>(null)
+  userRef.current = user
   const cacheRef = useRef(cache)
   cacheRef.current = cache
   const busy = useRef(false)
@@ -372,11 +385,45 @@ function Inner({ children }: { children: ReactNode }) {
     [refresh],
   )
 
+  const shareGroup = useCallback(
+    async (group: Group, backupJson: string): Promise<ShareResult> => {
+      const u = userRef.current
+      if (!u || u.anonymous) return { ok: false, reason: 'import', message: 'Google 계정으로 로그인해야 서버로 옮길 수 있어요' }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, reason: 'import', message: '인터넷에 연결되어 있지 않아요. 연결을 확인하고 다시 시도해 주세요' }
+      let storage: Storage | null = null
+      try {
+        storage = localStorage
+      } catch {
+        storage = null
+      }
+      try {
+        const c = await loadClient()
+        await confirmAge(c) // 서버가 만 14세 확인 여부를 요구한다 (이미 했으면 그대로)
+        const res = await shareLocalGroup(group, backupJson, {
+          storage,
+          links: () => linksRef.current,
+          setLinks: (l) => {
+            linksRef.current = l
+            setLinksState(l)
+            writeLinks(l)
+          },
+          importGroup: (payload) => importGroupRpc(c, payload),
+          fetchRows: async (id) => (await fetchGroupRows(c, id))?.rows ?? null,
+        })
+        if (res.ok) await refresh() // 서버 그룹을 목록에 불러온다
+        return res
+      } catch {
+        return { ok: false, reason: 'import', message: '서버로 옮기지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요. (다시 시도해도 중복으로 만들어지지 않아요)' }
+      }
+    },
+    [refresh],
+  )
+
   const dismissWrite = useCallback(() => setWrite({ state: 'idle' }), [])
   const groups = useMemo(() => toShared(cache), [cache])
   const value = useMemo<RemoteState>(
-    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, commitGroup, join, signInGoogle, signOut, leave }),
-    [user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, commitGroup, join, signInGoogle, signOut, leave],
+    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave }),
+    [user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

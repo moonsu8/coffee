@@ -6,7 +6,7 @@ import { useStore } from '@/store/store'
  * (그룹 추가·이름 변경·삭제는 설정에서)
  */
 export function GroupSwitcher() {
-  const { switchable, shared, data, switchGroup } = useStore()
+  const { switchable, shared, data, switchGroup, copyStatusOf } = useStore()
   if (switchable.length < 2) return null
   return (
     <div
@@ -31,6 +31,7 @@ export function GroupSwitcher() {
             <span aria-hidden>{g.emoji}</span>
             {g.name}
             {isShared && <span className="text-[11px] font-bold opacity-70">공유</span>}
+            {copyStatusOf(g.id) === 'stale' && <span className="text-[11px] font-bold opacity-70">이전 사본</span>}
           </button>
         )
       })}

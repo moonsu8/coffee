@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GroupRows, RemoteOp } from '../logic/remote-map'
+import type { GroupRows, ImportPayload, RemoteOp } from '../logic/remote-map'
 import type { Role } from './cache'
 import { parseSnapshotFull } from './snapshot'
 
@@ -81,6 +81,13 @@ export async function fetchGroupRows(c: SupabaseClient, groupId: string): Promis
   const { data, error } = await c.rpc('get_group_snapshot', { p_group: groupId })
   if (error) throw new Error(error.message)
   return data === null ? null : parseSnapshotFull(data)
+}
+
+/** 내 기기 그룹을 서버로 올린다(한 트랜잭션, import_key가 같으면 같은 그룹 id를 돌려준다) */
+export async function importGroupRpc(c: SupabaseClient, payload: ImportPayload): Promise<string> {
+  const { data, error } = await c.rpc('import_group', { p: payload })
+  if (error || typeof data !== 'string') throw new Error(error?.message ?? 'import_failed')
+  return data
 }
 
 export interface Applied {

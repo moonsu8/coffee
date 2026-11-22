@@ -54,6 +54,18 @@
 5. (테스트 프로젝트만) `test-only/sentinel.sql`
 
 새 마이그레이션이 생기면 번호 순서대로 이어서 적용한다. 이미 적용한 파일은 다시 Run하지 않는다(`0001`은 다시 돌리면 "already exists" 오류가 난다).
+### 적용 확인 쿼리 (SQL Editor에서 한 줄씩 Run → 결과가 `true`(또는 13)이면 적용된 것)
+| 파일 | 확인 쿼리 | 기대 결과 |
+|---|---|---|
+| `0001_init.sql` | `select count(*) from information_schema.tables where table_schema='public' and table_name in ('profiles','groups','group_members','members','records','absences','skip_days','orders','prices','invites','join_requests','invite_attempts','entitlements');` | `13` |
+| `0002_import_keep_ids.sql` | `select position('[0-9a-f]{8}' in pg_get_functiondef('public.import_group(jsonb)'::regprocedure)) > 0 as ok;` | `true` |
+| `0003_group_snapshot.sql` | `select to_regprocedure('public.get_group_snapshot(uuid)') is not null as ok;` | `true` |
+| `0004_apply_group_ops.sql` | `select exists(select 1 from information_schema.columns where table_schema='public' and table_name='groups' and column_name='rev') and to_regprocedure('public.apply_group_ops(uuid,bigint,jsonb)') is not null as ok;` | `true` |
+| `test-only/sentinel.sql` (테스트만) | `select public.is_test_project();` | `true` |
+
+새 SQL 파일을 만들 때마다 **한 줄 확인 쿼리를 이 표와 채팅에 같이 적는다**(새 함수·컬럼이 있는지 조회). "Success"만으로는 적용 여부를 알 수 없다(실제로 다른 프로젝트·다른 내용에 실행한 적이 있었다).
+앱 쪽에서는 `npm run test:rls`가 같은 것을 확인한다(적용 안 된 SQL이 있으면 해당 테스트가 실패한다).
+
 적용 뒤에 함수가 안 보이면 SQL Editor에서 `notify pgrst, 'reload schema';` 를 한 번 실행한다.
 
 환경 변수 이름은 일부러 다르다. 서로 섞이면 안 된다.

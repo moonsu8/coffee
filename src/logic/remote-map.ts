@@ -214,19 +214,29 @@ export interface ImportPayload {
 }
 
 /**
- * 기기의 그룹 → import_group 입력.
+ * 기기의 그룹 → import_group 입력 + "옮긴 뒤 서버에서 읽었을 때 기대하는 그룹".
  * 멤버 id는 기기용(짧은 문자열)이라 서버용 uuid로 모두 바꾼다(금액·주문 안의 참조까지 함께). 서버는 uuid인 ref를 그대로 id로 쓴다(0002).
- * `uuid`는 테스트에서 고정값을 넣기 위한 주입 지점.
+ * `idMap`을 넘기면 이미 정한 id를 그대로 쓴다(재시도해도 같은 payload가 되도록). `uuid`는 테스트에서 고정값을 넣기 위한 주입 지점.
  */
-export function groupToImport(g: Group, importKey: string, uuid: () => string = () => crypto.randomUUID()): ImportPayload {
-  const ids = new Map<string, string>()
+export interface ImportPlan {
+  payload: ImportPayload
+  /** 서버에서 다시 읽었을 때 같아야 하는 그룹 (멤버 id는 uuid로 바뀐 상태, 그룹 id와 휴가 id는 서버가 정하므로 비교에서 뺀다) */
+  expected: Group
+  /** 기기 멤버 id → 서버 uuid (재시도용으로 저장해 둔다) */
+  idMap: Record<string, string>
+}
+
+export function planImport(g: Group, importKey: string, opts: { uuid?: () => string; idMap?: Record<string, string> } = {}): ImportPlan {
+  const uuid = opts.uuid ?? (() => crypto.randomUUID())
+  const ids = new Map<string, string>(Object.entries(opts.idMap ?? {}))
   const mapId = (id: string) => {
     let v = ids.get(id)
     if (!v) ids.set(id, (v = uuid()))
     return v
   }
-  const rows = groupToRows(remapMemberIds(g, mapId))
-  return {
+  const remapped = remapMemberIds(g, mapId)
+  const rows = groupToRows(remapped)
+  const payload: ImportPayload = {
     import_key: importKey,
     name: rows.group.name,
     emoji: rows.group.emoji,
@@ -239,6 +249,24 @@ export function groupToImport(g: Group, importKey: string, uuid: () => string = 
     orders: rows.orders.map((o) => ({ date: o.date, payload: o.payload })),
     ...(rows.prices ? { prices: { payload: rows.prices.payload } } : {}),
   }
+  return { payload, expected: remapped, idMap: Object.fromEntries(ids) }
+}
+
+/** (호환) payload만 필요할 때 */
+export function groupToImport(g: Group, importKey: string, uuid: () => string = () => crypto.randomUUID()): ImportPayload {
+  return planImport(g, importKey, { uuid }).payload
+}
+
+/**
+ * 옮긴 결과 비교: 서버에서 읽은 그룹이 기대한 그룹과 같은 내용인지. 다른 부분의 이름 목록을 돌려준다(같으면 빈 배열).
+ * 그룹 id와 휴가 id는 서버가 새로 정하므로 비교하지 않는다.
+ */
+export function diffContent(actual: Group, expected: Group): string[] {
+  const norm = (g: Group) => ({ ...g, id: '-', absences: g.absences.map((a) => ({ ...a, id: '-' })).sort((x, y) => (x.from + x.to + x.memberId < y.from + y.to + y.memberId ? -1 : 1)) })
+  const a = norm(actual) as unknown as Record<string, unknown>
+  const e = norm(expected) as unknown as Record<string, unknown>
+  const keys = new Set([...Object.keys(a), ...Object.keys(e)])
+  return [...keys].filter((k) => stable(a[k]) !== stable(e[k])).sort()
 }
 
 /* ───────── 변경 비교 (스토어의 변경 → 서버 쓰기 목록) ───────── */

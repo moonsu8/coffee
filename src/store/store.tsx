@@ -3,6 +3,7 @@ import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, Order
 import { EMPTY_DATA, parseAppData, type Recovery } from '../lib/data'
 import { LOCAL_ACCESS, localRepository, type Access, type AppRepository } from '../lib/repository'
 import { useRemote, type SharedGroup } from '../remote/provider'
+import { copyStatus, type CopyStatus } from '../remote/links'
 import { formatSavedAt } from '../lib/format'
 import { Button } from '../components/ui/button'
 import { Sheet } from '../components/ui/sheet'
@@ -40,8 +41,12 @@ interface Store {
   groups: Group[]
   /** 서버에서 읽어 온 공유 그룹들 (읽기 전용) */
   shared: SharedGroup[]
-  /** 전환기에 보여줄 모든 그룹 (내 기기 그룹 + 공유 그룹) */
+  /** 전환기에 보여줄 모든 그룹 (내 기기 그룹 + 공유 그룹. 서버로 옮겨서 서버 그룹이 보이는 동안의 내 기기 사본은 뺀다) */
   switchable: Group[]
+  /** 내 기기 그룹이 서버 그룹과 어떤 관계인지 (null = 일반 그룹) */
+  copyStatusOf: (localGroupId: string) => CopyStatus
+  /** "이전 사본"을 이번 실행 동안 수정할 수 있게 한다 (경고를 확인한 뒤에 부른다) */
+  unlockCopy: (localGroupId: string) => void
   /** 현재 그룹 템플릿의 용어 (커피는 지금 문구 그대로) */
   terms: Terms
   switchGroup: (id: string) => void
@@ -112,8 +117,15 @@ export function StoreProvider({ children, repository = localRepository }: { chil
   rootRef.current = root
   const remote = useRemote()
   const shared = remote.groups
-  const switchable = useMemo(() => [...root.groups, ...shared.map((s) => s.group)], [root.groups, shared])
-  const group = switchable.find((g) => g.id === activeId) ?? root.groups[0]
+  const visibleRemote = useMemo(() => new Set(shared.map((s) => s.group.id)), [shared])
+  const statusOf = (localId: string): CopyStatus => copyStatus(remote.links[localId], visibleRemote)
+  const switchable = useMemo(
+    () => [...root.groups.filter((g) => copyStatus(remote.links[g.id], visibleRemote) !== 'moved'), ...shared.map((s) => s.group)],
+    [root.groups, shared, remote.links, visibleRemote],
+  )
+  const group = switchable.find((g) => g.id === activeId) ?? switchable[0] ?? root.groups[0]
+  // 서버로 옮긴 그룹의 이전 사본: 서버 그룹이 안 보이는 동안 수정하려면 경고를 확인해야 한다(이번 실행 동안만 유지)
+  const [unlocked, setUnlocked] = useState<ReadonlySet<string>>(new Set())
   // 서버 그룹: 그룹장이면 수정할 수 있고(서버에 저장), 그룹원이면 읽기만 한다
   const sharedInfo = shared.find((s) => s.group.id === group.id)
   const data = useMemo(() => groupToView(group), [group])
@@ -147,12 +159,15 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     // 그리고 updatedAt을 갱신한다.
     const gid = group.id
     // 서버 그룹 id는 uuid여야 한다(서버 키 형식). 내 기기 그룹은 짧은 id를 그대로 쓴다
+    const staleCopy = !sharedInfo && copyStatus(remote.links[group.id], visibleRemote) === 'stale'
+    const lockedCopy = staleCopy && !unlocked.has(group.id)
     const makeId = () => (sharedInfo ? crypto.randomUUID() : uid())
     // 그룹원(읽기 전용) 그룹은 어떤 변경 함수를 불러도 데이터가 바뀌지 않는다 (화면에서 버튼을 숨기는 것과 별개의 안전장치).
     // 그룹장의 서버 그룹은 변경을 서버에 보낸다(낙관적으로 먼저 화면에 반영). 오프라인이면 반영하지 않고 안내한다.
     const set = (fn: (v: GroupView) => GroupView) => {
-      if (!sharedInfo) setRoot((r) => updateGroupView(r, gid, fn))
-      else if (sharedInfo.role === 'owner') remote.commitGroup(gid, (g) => applyView(g, fn(groupToView(g))))
+      if (!sharedInfo) {
+        if (!lockedCopy) setRoot((r) => updateGroupView(r, gid, fn))
+      } else if (sharedInfo.role === 'owner') remote.commitGroup(gid, (g) => applyView(g, fn(groupToView(g))))
     }
     const cur = () => groupToView(rootRef.current.groups.find((g) => g.id === gid) ?? remote.getGroup(gid) ?? group)
     const putPurchase = (p: Purchase | undefined, date: DateStr) =>
@@ -170,7 +185,9 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     return {
       access: sharedInfo
         ? { kind: 'remote', role: sharedInfo.role, canWrite: sharedInfo.role === 'owner' && remote.online, lastSyncedAt: sharedInfo.fetchedAt }
-        : LOCAL_ACCESS,
+        : staleCopy
+          ? { kind: 'local', staleCopy: true, canWrite: !lockedCopy, lastSyncedAt: null }
+          : LOCAL_ACCESS,
       data,
       root,
       today,
@@ -178,8 +195,10 @@ export function StoreProvider({ children, repository = localRepository }: { chil
       shared,
       switchable,
       terms: termsOf(group.config),
+      copyStatusOf: statusOf,
+      unlockCopy: (id) => setUnlocked((p) => new Set(p).add(id)),
       switchGroup: (id) => {
-        if (!switchable.some((g) => g.id === id)) return
+        if (!switchable.some((g) => g.id === id) && !remote.getGroup(id)) return
         setActiveId(id)
         repository.writeActiveGroup(id)
       },
@@ -352,7 +371,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         setRoot(await repository.loadInitial())
       },
     }
-  }, [root, today, group, data, repository, shared, switchable, sharedInfo, remote])
+  }, [root, today, group, data, repository, shared, switchable, sharedInfo, remote, visibleRemote, unlocked])
 
   if (!ready) return null
   if (blocked) {

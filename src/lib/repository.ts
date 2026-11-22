@@ -61,6 +61,8 @@ export interface Access {
   kind: 'local' | 'remote'
   /** 서버 그룹: 그룹장이고 인터넷이 연결돼 있을 때만 true */
   role?: 'owner' | 'viewer'
+  /** 서버로 옮긴 그룹의 "이전 사본"(서버 그룹이 지금 안 보이는 내 기기 그룹). 수정하려면 경고를 확인해야 한다 */
+  staleCopy?: boolean
   canWrite: boolean
   /** 서버 그룹의 마지막 동기화 시각(ms). 로컬은 null */
   lastSyncedAt: number | null

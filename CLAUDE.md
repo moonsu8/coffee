@@ -139,3 +139,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 서버 그룹 읽기는 RPC `get_group_snapshot` 한 번(일관된 스냅샷). 갱신은 앱 열 때·화면 복귀 시(30초 간격)·온라인 복귀 시·수동 새로고침. 실시간은 1-E.
 - 로그인 세션은 supabase-js가 `coffee-duty:auth` 키에 저장한다. 세션도 캐시도 없으면 서버에 연결하지 않는다. 익명 세션은 도메인이 바뀌면 사라진다(도메인 확정 전에는 실제 그룹원을 `github.io`로 초대하지 않는다).
 - DB 마이그레이션은 `supabase/migrations/`에 번호 순서로 쌓고 이미 적용한 파일은 고치지 않는다(새 번호로 추가). 적용 순서와 방법: `docs/SUPABASE.md`. Google 로그인 설정: `docs/GOOGLE_OAUTH.md`.
+- **새 SQL 규칙**: 사용자가 대시보드에서 SQL을 Run하게 할 때는 **한 줄 확인 쿼리**(새 함수·컬럼이 있는지 조회)와 기대 결과를 항상 함께 알려 주고 `docs/SUPABASE.md`의 확인 쿼리 표에도 추가한다. "Success" 표시만으로 적용을 믿지 않는다.
+- **서버 쓰기(그룹장)**: 서버 그룹은 변경 전/후 `diffGroups`를 `apply_group_ops`(0004, 한 트랜잭션, `rev` 충돌 감지)로 보낸다. `remote/writer.ts`가 그룹별 순서 대기열(성공마다 rev 이어가기, 충돌·오류 시 뒤 변경 폐기 → 최신 내용 다시 읽기), `remote/provider.tsx`의 `commitGroup`이 낙관적 반영. 오프라인이면 쓰기를 막는다(`access.canWrite = 그룹장 && online`, 큐는 나중). 서버 그룹의 새 멤버·휴가 id는 `crypto.randomUUID()`(`makeId`).
+- **내 기기 그룹 → 서버로 옮기기(`remote/share.ts`)**: 백업(`coffee-duty:backup-before-share-<그룹id>`, 처음 한 번만) → 연결 정보(`coffee-duty:share-links`: importKey·멤버 id 매핑, 올리기 전에 먼저 저장) → `import_group`(같은 key면 같은 그룹, 재시도 안전) → 서버에서 다시 읽어 `diffContent`로 대조(`verified`). 다르면 경고하고 이 기기 사본 삭제를 권하지 않는다. 연결 정보는 AppData와 분리된 기기 키(내보내기·shadow에 안 섞임)이고 로그아웃해도 유지한다.
+- **사본 상태(`remote/links.ts` `copyStatus`)**: 서버 그룹이 보이면 내 기기 사본은 전환기에서 숨김(`moved`), 안 보이면(로그아웃 등) "서버로 옮긴 그룹의 이전 사본"(`stale`)으로 보이고 **기본은 수정 불가**, 배너의 [수정하기] → 경고 확인 후 이번 실행 동안만 수정 가능(`access.staleCopy`, `unlockCopy`). 이 사본의 수정은 서버로 가지 않는다.
