@@ -28,6 +28,7 @@ export function InviteSheet({ shared, onClose }: { shared: SharedGroup | null; o
   const defaults = defaultInviteOptions(g?.members.length ?? 1)
   const [ttl, setTtl] = useState(defaults.ttlHours)
   const [maxUses, setMaxUses] = useState(defaults.maxUses)
+  const [approval, setApproval] = useState(false)
   const [invites, setInvites] = useState<InviteRow[] | null>(null)
   const [viewers, setViewers] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,6 +56,7 @@ export function InviteSheet({ shared, onClose }: { shared: SharedGroup | null; o
     const d = defaultInviteOptions(g?.members.length ?? 1)
     setTtl(d.ttlHours)
     setMaxUses(d.maxUses)
+    setApproval(false)
     setInvites(null)
     setViewers(null)
     setConfirmCode(null)
@@ -75,7 +77,7 @@ export function InviteSheet({ shared, onClose }: { shared: SharedGroup | null; o
     setError(null)
     try {
       const c = await loadClient()
-      await createInviteRpc(c, g.id, { ttlHours: ttl, maxUses: clampMaxUses(maxUses) })
+      await createInviteRpc(c, g.id, { ttlHours: ttl, maxUses: clampMaxUses(maxUses), requiresApproval: approval })
       await load()
       toast({ message: '초대 코드를 만들었어요', duration: 2500 })
     } catch (e) {
@@ -151,6 +153,14 @@ export function InviteSheet({ shared, onClose }: { shared: SharedGroup | null; o
             </button>
             <span className="text-[13px] text-ink-2">명 (그룹 멤버 {g.members.length}명 기준)</span>
           </div>
+
+          <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl bg-surface-2 px-4 py-2.5">
+            <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)} aria-label="참여하기 전에 내 승인 받기" className="mt-0.5 size-5 shrink-0 accent-[var(--caramel)]" />
+            <span>
+              <span className="block text-[15px] font-semibold">참여하기 전에 내 승인 받기</span>
+              <span className="block text-xs leading-snug text-ink-2">코드를 입력해도 그룹 관리에서 승인해야 볼 수 있어요</span>
+            </span>
+          </label>
         </section>
 
         <section aria-label="지금 쓸 수 있는 코드">
@@ -175,7 +185,7 @@ export function InviteSheet({ shared, onClose }: { shared: SharedGroup | null; o
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <p className="text-xs text-ink-2">
-                    {formatExpiry(inv.expires_at)} · {inv.uses}/{inv.max_uses}명 참여
+                    {formatExpiry(inv.expires_at)} · {inv.uses}/{inv.max_uses}명 참여{inv.requires_approval ? ' · 승인 필요' : ''}
                   </p>
                   <button onClick={() => void revoke(inv.code)} className={cn('min-h-9 rounded-full px-3 text-xs font-bold', confirmCode === inv.code ? 'bg-danger/15 text-danger' : 'text-ink-2')}>
                     {confirmCode === inv.code ? '한 번 더 누르면 취소' : '코드 취소'}

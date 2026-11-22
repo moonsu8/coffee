@@ -5,6 +5,8 @@ export interface GoneNotice {
   id: string
   name: string
   emoji: string
+  /** 지정하면 기본 문구 대신 이 문구를 보여준다(참여 거절 등) */
+  text?: string
 }
 
 /**
@@ -19,4 +21,5 @@ export function findGone(prev: CacheMap, memberIds: string[]): GoneNotice[] {
 }
 
 export const goneMessage = (n: GoneNotice) =>
+  n.text ??
   `${n.emoji} ${n.name} 그룹이 없어졌어요. 그룹이 삭제됐거나 더 이상 볼 수 없어요. 이 기기에 저장해 둔 이 그룹의 내용은 지웠어요`

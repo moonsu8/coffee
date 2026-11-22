@@ -24,6 +24,7 @@ import {
   type RemoteUser,
 } from './api'
 import { clearCache, readCache, writeCache, type CacheMap, type Role } from './cache'
+import { deleteAccountRpc, deleteGroupRpc, listJoinRequests, openMembershipChannel, removeViewerRpc, resolveJoinRequestRpc, transferOwnershipRpc, type JoinRequestRow } from './admin-api'
 import { findGone, type GoneNotice } from './gone'
 import { joinErrorMessage } from './invite'
 import { createRealtimeSync, type RealtimeState, type RealtimeSync } from './realtime'
@@ -34,6 +35,23 @@ export interface SharedGroup {
   group: Group
   role: Role
   fetchedAt: number
+}
+
+export interface ActionResult {
+  ok: boolean
+  message?: string
+}
+
+/** 내가 보낸 참여 요청 중 그룹장의 승인을 기다리는 것 */
+export interface MyRequest {
+  groupId: string
+  name: string
+}
+
+export interface JoinOptions {
+  nickname?: string
+  /** 익명 로그인 CAPTCHA 토큰(서버가 켜 둔 경우) */
+  captchaToken?: string
 }
 
 export type JoinResult = { ok: true; pending: boolean; name?: string } | { ok: false; message: string }
@@ -60,6 +78,16 @@ export interface RemoteState {
   /** 서버 그룹이 삭제됐거나 내가 빠져서 사라졌다는 안내 */
   notices: GoneNotice[]
   dismissNotice: (id: string) => void
+  /** 내가 그룹장인 그룹으로 온, 승인 대기 중인 참여 요청 (그룹 id별) */
+  requests: Record<string, JoinRequestRow[]>
+  /** 내가 보낸 참여 요청 중 승인 대기 */
+  myRequests: MyRequest[]
+  resolveRequest: (requestId: string, approve: boolean) => Promise<ActionResult>
+  removeViewer: (groupId: string, userId: string) => Promise<ActionResult>
+  transferOwnership: (groupId: string, userId: string) => Promise<ActionResult>
+  deleteGroup: (groupId: string) => Promise<ActionResult>
+  /** 계정 삭제: 내가 그룹장인 그룹과 내 정보가 서버에서 즉시 지워진다 */
+  deleteAccount: () => Promise<ActionResult>
   refresh: () => Promise<void>
   /** 최신 그룹(낙관적 반영 포함). 스토어의 되돌리기가 옛 값을 쓰지 않게 한다 */
   getGroup: (groupId: string) => Group | undefined
@@ -69,7 +97,7 @@ export interface RemoteState {
   shareGroup: (group: Group, backupJson: string) => Promise<ShareResult>
   /** 그룹장 쓰기: 변경 함수를 최신 그룹에 적용해 서버에 보낸다. 쓸 수 없으면 false */
   commitGroup: (groupId: string, mutate: (g: Group) => Group) => boolean
-  join: (code: string) => Promise<JoinResult>
+  join: (code: string, opts?: JoinOptions) => Promise<JoinResult>
   signInGoogle: () => Promise<{ ok: boolean; message?: string }>
   signOut: () => Promise<void>
   leave: (groupId: string) => Promise<{ ok: boolean; message?: string }>
@@ -87,6 +115,13 @@ const OFF: RemoteState = {
   realtime: 'off',
   notices: [],
   dismissNotice: () => {},
+  requests: {},
+  myRequests: [],
+  resolveRequest: async () => ({ ok: false }),
+  removeViewer: async () => ({ ok: false }),
+  transferOwnership: async () => ({ ok: false }),
+  deleteGroup: async () => ({ ok: false }),
+  deleteAccount: async () => ({ ok: false }),
   refresh: async () => {},
   getGroup: () => undefined,
   links: {},
@@ -123,6 +158,27 @@ const safeDel = (k: string) => {
   }
 }
 
+const PENDING_KEY = 'coffee-duty:join-pending' // 기기별: 승인 대기 중인 그룹 이름 (서버에서는 그룹 이름을 볼 수 없어서)
+const readPending = (): Record<string, string> => {
+  try {
+    const j = JSON.parse(safeGet(PENDING_KEY) ?? '{}')
+    return j && typeof j === 'object' ? (j as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+const writePending = (m: Record<string, string>) => (Object.keys(m).length ? safeSet(PENDING_KEY, JSON.stringify(m)) : safeDel(PENDING_KEY))
+
+const adminError = (e: unknown, fallback: string): string => {
+  const m = e instanceof Error ? e.message : ''
+  if (isNetworkError(e)) return '인터넷에 연결되어 있지 않아요. 연결을 확인하고 다시 시도해 주세요'
+  if (m.includes('forbidden')) return '그룹장만 할 수 있어요'
+  if (m.includes('target_not_member')) return '이 그룹의 그룹원에게만 넘길 수 있어요'
+  if (m.includes('too_many_groups')) return '받는 사람이 만들 수 있는 그룹 수를 넘었어요'
+  if (m.includes('invite_full')) return '초대 코드의 인원이 가득 차서 승인할 수 없어요. 새 코드를 만든 뒤 다시 요청해 달라고 해 주세요'
+  return fallback
+}
+
 const toShared = (cache: CacheMap): SharedGroup[] =>
   Object.values(cache)
     .map((c) => ({ group: rowsToGroup(c.rows), role: c.role, fetchedAt: c.fetchedAt }))
@@ -153,6 +209,8 @@ function Inner({ children }: { children: ReactNode }) {
   const [write, setWrite] = useState<WriteStatus>({ state: 'idle' })
   const [realtime, setRealtime] = useState<RealtimeState>('off')
   const [notices, setNotices] = useState<GoneNotice[]>([])
+  const [requests, setRequests] = useState<Record<string, JoinRequestRow[]>>({})
+  const [myRequests, setMyRequests] = useState<MyRequest[]>([])
   const [links, setLinksState] = useState<Links>(() => readLinks())
   const linksRef = useRef(links)
   const userRef = useRef<RemoteUser | null>(null)
@@ -172,6 +230,40 @@ function Inner({ children }: { children: ReactNode }) {
   }, [])
 
   const anyWriting = () => [...writers.current.values()].some((w) => w.busy())
+
+  /** 참여 요청 상태(내가 보낸 것·내 그룹으로 온 것)를 읽는다. 실패해도 나머지 화면에는 영향 없다 */
+  const loadRequests = useCallback(async (c: Awaited<ReturnType<typeof loadClient>>, uid: string, memberships: { group_id: string; role: Role }[]) => {
+    try {
+      const rows = await listJoinRequests(c)
+      const owned = new Set(memberships.filter((m) => m.role === 'owner').map((m) => m.group_id))
+      const byGroup: Record<string, JoinRequestRow[]> = {}
+      for (const r of rows) if (r.status === 'pending' && r.user_id !== uid && owned.has(r.group_id)) (byGroup[r.group_id] ??= []).push(r)
+      setRequests(byGroup)
+      const names = readPending()
+      const joined = new Set(memberships.map((m) => m.group_id))
+      const waiting: MyRequest[] = []
+      let changed = false
+      for (const r of rows.filter((x) => x.user_id === uid)) {
+        if (r.status === 'pending') waiting.push({ groupId: r.group_id, name: names[r.group_id] ?? '그룹' })
+        else if (r.status === 'rejected' && r.group_id in names) {
+          const name = names[r.group_id]
+          delete names[r.group_id]
+          changed = true
+          setNotices((p) => [...p, { id: 'rej-' + r.group_id, name, emoji: '🚫', text: `${name} 그룹 참여 요청이 거절됐어요. 그룹장에게 확인해 주세요` }])
+        }
+      }
+      for (const g of Object.keys(names)) {
+        if (joined.has(g)) {
+          delete names[g]
+          changed = true
+        }
+      }
+      if (changed) writePending(names)
+      setMyRequests(waiting)
+    } catch {
+      /* 요청 목록은 보조 정보라 실패하면 지난 값을 둔다 */
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     if (busy.current) return
@@ -221,13 +313,14 @@ function Inner({ children }: { children: ReactNode }) {
       commit(next)
       setOffline(failed)
       lastRun.current = Date.now()
+      void loadRequests(c, u.id, memberships)
     } catch (e) {
       if (isNetworkError(e)) setOffline(true)
     } finally {
       busy.current = false
       setRefreshing(false)
     }
-  }, [commit])
+  }, [commit, loadRequests])
   refreshRef.current = refresh
 
   // 시작: 세션/캐시/로그인 복귀 표시가 있을 때만 서버에 연결한다
@@ -295,6 +388,7 @@ function Inner({ children }: { children: ReactNode }) {
   // 실시간 변경 알림: 내 서버 그룹들의 rev가 바뀌면 서버에서 다시 읽는다 (알림 내용은 믿지 않고 신호로만 쓴다)
   const rtRef = useRef<RealtimeSync | null>(null)
   const groupIdsKey = Object.keys(cache).sort().join(',')
+  const userId = user?.id ?? null
   useEffect(() => {
     if (!rtRef.current) {
       rtRef.current = createRealtimeSync({
@@ -303,7 +397,8 @@ function Inner({ children }: { children: ReactNode }) {
           let closed = false
           void loadClient()
             .then((c) => {
-              if (!closed) off = openGroupChannel(c, gid, onEvent, onStatus)
+              if (closed) return
+              off = gid.startsWith('me:') ? openMembershipChannel(c, gid.slice(3), onEvent, onStatus) : openGroupChannel(c, gid, onEvent, onStatus)
             })
             .catch(() => onStatus('down'))
           return () => {
@@ -316,8 +411,11 @@ function Inner({ children }: { children: ReactNode }) {
         onState: setRealtime,
       })
     }
-    rtRef.current.sync(groupIdsKey ? groupIdsKey.split(',') : [])
-  }, [groupIdsKey])
+    // 그룹마다 변경 알림 + 로그인했으면 내 소속 변경 신호(내보내짐·그룹 삭제·참여 승인·참여 요청)
+    const ids = groupIdsKey ? groupIdsKey.split(',') : []
+    if (userId) ids.push('me:' + userId)
+    rtRef.current.sync(ids)
+  }, [groupIdsKey, userId])
   useEffect(
     () => () => {
       rtRef.current?.close()
@@ -378,16 +476,20 @@ function Inner({ children }: { children: ReactNode }) {
   )
 
   const join = useCallback(
-    async (code: string): Promise<JoinResult> => {
+    async (code: string, opts: JoinOptions = {}): Promise<JoinResult> => {
       try {
         const c = await loadClient()
         let u = await currentUser(c)
-        if (!u) u = await signInAnonymously(c) // 코드를 입력하는 순간에만 만든다
+        if (!u) u = await signInAnonymously(c, opts.captchaToken) // 코드를 입력하는 순간에만 만든다
         setUser(u)
         await confirmAge(c)
-        const res = await redeemInvite(c, code)
+        const res = await redeemInvite(c, code, opts.nickname?.trim() || undefined)
         if (res.status === 'invalid') return { ok: false, message: '코드가 맞지 않거나 만료됐어요. 그룹장에게 새 코드를 받아 주세요' }
-        if (res.status === 'pending') return { ok: true, pending: true, name: res.name }
+        if (res.status === 'pending') {
+          if (res.group_id) writePending({ ...readPending(), [res.group_id]: res.name ?? '그룹' })
+          await refresh() // 승인 대기 표시
+          return { ok: true, pending: true, name: res.name }
+        }
         await refresh()
         return { ok: true, pending: false, name: res.name }
       } catch (e) {
@@ -396,6 +498,99 @@ function Inner({ children }: { children: ReactNode }) {
     },
     [refresh],
   )
+
+  /** 서버로 옮겼던 연결 정보(내 기기 사본 ↔ 서버 그룹)를 지운다: 서버 그룹이 사라지면 내 기기 사본은 다시 일반 그룹이 된다 */
+  const dropLinks = useCallback((match: (remoteId: string) => boolean) => {
+    const next: Links = {}
+    for (const [id, l] of Object.entries(linksRef.current)) if (!(l.remoteId && match(l.remoteId))) next[id] = l
+    linksRef.current = next
+    setLinksState(next)
+    writeLinks(next)
+  }, [])
+
+  const resolveRequest = useCallback(
+    async (requestId: string, approve: boolean): Promise<ActionResult> => {
+      try {
+        await resolveJoinRequestRpc(await loadClient(), requestId, approve)
+        void refresh()
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, message: adminError(e, '처리하지 못했어요. 잠시 후 다시 시도해 주세요') }
+      }
+    },
+    [refresh],
+  )
+
+  const removeViewer = useCallback(
+    async (groupId: string, userId: string): Promise<ActionResult> => {
+      try {
+        await removeViewerRpc(await loadClient(), groupId, userId)
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, message: adminError(e, '내보내지 못했어요. 잠시 후 다시 시도해 주세요') }
+      }
+    },
+    [],
+  )
+
+  const transferOwnership = useCallback(
+    async (groupId: string, userId: string): Promise<ActionResult> => {
+      try {
+        writers.current.delete(groupId)
+        await transferOwnershipRpc(await loadClient(), groupId, userId)
+        await refresh() // 내 역할이 그룹원으로 바뀐 것을 읽는다
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, message: adminError(e, '그룹장을 넘기지 못했어요. 잠시 후 다시 시도해 주세요') }
+      }
+    },
+    [refresh],
+  )
+
+  const deleteGroup = useCallback(
+    async (groupId: string): Promise<ActionResult> => {
+      try {
+        if (writers.current.get(groupId)?.busy()) return { ok: false, message: '저장 중이에요. 잠시 후 다시 시도해 주세요' }
+        await deleteGroupRpc(await loadClient(), groupId)
+        writers.current.delete(groupId)
+        // 내가 지운 그룹이라 "그룹이 없어졌어요" 안내는 띄우지 않는다
+        const { [groupId]: _gone, ...rest } = cacheRef.current
+        void _gone
+        commit(rest)
+        dropLinks((id) => id === groupId)
+        void refresh()
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, message: adminError(e, '그룹을 지우지 못했어요. 잠시 후 다시 시도해 주세요') }
+      }
+    },
+    [commit, dropLinks, refresh],
+  )
+
+  const deleteAccount = useCallback(async (): Promise<ActionResult> => {
+    try {
+      const c = await loadClient()
+      await deleteAccountRpc(c)
+      try {
+        await signOutRemote(c) // 계정이 이미 지워져서 실패할 수 있다
+      } catch {
+        /* 이 기기의 세션은 아래에서 지운다 */
+      }
+      safeDel(AUTH_KEY)
+      safeDel(PENDING_KEY)
+      writers.current.clear()
+      dropLinks(() => true)
+      setUser(null)
+      setRequests({})
+      setMyRequests([])
+      setNotices([])
+      setWrite({ state: 'idle' })
+      commit({})
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: adminError(e, '계정을 지우지 못했어요. 잠시 후 다시 시도해 주세요') }
+    }
+  }, [commit, dropLinks])
 
   const signInGoogle = useCallback(async () => {
     try {
@@ -419,6 +614,8 @@ function Inner({ children }: { children: ReactNode }) {
     safeDel(AUTH_KEY)
     writers.current.clear()
     setUser(null)
+    setRequests({})
+    setMyRequests([])
     setWrite({ state: 'idle' })
     commit({})
   }, [commit])
@@ -476,8 +673,8 @@ function Inner({ children }: { children: ReactNode }) {
   const dismissNotice = useCallback((id: string) => setNotices((p) => p.filter((n) => n.id !== id)), [])
   const groups = useMemo(() => toShared(cache), [cache])
   const value = useMemo<RemoteState>(
-    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave }),
-    [user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave],
+    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, requests, myRequests, resolveRequest, removeViewer, transferOwnership, deleteGroup, deleteAccount, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave }),
+    [user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, requests, myRequests, resolveRequest, removeViewer, transferOwnership, deleteGroup, deleteAccount, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

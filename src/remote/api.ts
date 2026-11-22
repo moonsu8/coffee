@@ -43,8 +43,8 @@ export async function currentUser(c: SupabaseClient): Promise<RemoteUser | null>
   return u ? { id: u.id, anonymous: Boolean(u.is_anonymous) } : null
 }
 
-export async function signInAnonymously(c: SupabaseClient): Promise<RemoteUser> {
-  const { data, error } = await c.auth.signInAnonymously()
+export async function signInAnonymously(c: SupabaseClient, captchaToken?: string): Promise<RemoteUser> {
+  const { data, error } = await c.auth.signInAnonymously(captchaToken ? { options: { captchaToken } } : undefined)
   if (error || !data.user) throw new Error(error?.message ?? 'anonymous_failed')
   return { id: data.user.id, anonymous: true }
 }
@@ -60,8 +60,8 @@ export interface Redeemed {
   name?: string
 }
 
-export async function redeemInvite(c: SupabaseClient, code: string): Promise<Redeemed> {
-  const { data, error } = await c.rpc('redeem_invite', { p_code: code })
+export async function redeemInvite(c: SupabaseClient, code: string, nickname?: string): Promise<Redeemed> {
+  const { data, error } = await c.rpc('redeem_invite', nickname ? { p_code: code, p_nickname: nickname } : { p_code: code })
   if (error) throw new Error(error.message)
   return data as Redeemed
 }
@@ -122,8 +122,8 @@ export async function countViewers(c: SupabaseClient, groupId: string): Promise<
   return count ?? 0
 }
 
-export async function createInviteRpc(c: SupabaseClient, groupId: string, o: { ttlHours: number; maxUses: number }): Promise<string> {
-  const { data, error } = await c.rpc('create_invite', { p_group: groupId, p_ttl_hours: o.ttlHours, p_max_uses: o.maxUses, p_requires_approval: false })
+export async function createInviteRpc(c: SupabaseClient, groupId: string, o: { ttlHours: number; maxUses: number; requiresApproval?: boolean }): Promise<string> {
+  const { data, error } = await c.rpc('create_invite', { p_group: groupId, p_ttl_hours: o.ttlHours, p_max_uses: o.maxUses, p_requires_approval: o.requiresApproval === true })
   if (error || typeof data !== 'string') throw new Error(error?.message ?? 'invite_failed')
   return data
 }

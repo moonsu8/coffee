@@ -30,6 +30,7 @@ export function joinErrorMessage(raw: string | undefined, offline = false): stri
   if (offline) return '인터넷에 연결되어 있지 않아요. 연결을 확인하고 다시 시도해 주세요'
   if (m.includes('rate_limited')) return '시도가 너무 많아요. 잠시 후 다시 해 주세요'
   if (m.includes('age_not_confirmed')) return '만 14세 이상 확인이 필요해요'
+  if (/captcha/i.test(m)) return '사람이 맞는지 확인하지 못했어요. 잠시 후 다시 시도해 주세요'
   return '지금은 참여할 수 없어요. 잠시 후 다시 시도해 주세요'
 }
 

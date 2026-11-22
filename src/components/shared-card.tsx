@@ -1,13 +1,18 @@
-import { LogIn, RefreshCw, UserPlus, Users } from 'lucide-react'
-import { useState } from 'react'
+import { Hourglass, LogIn, RefreshCw, Settings2, UserPlus, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Card, SectionTitle } from '@/components/common'
 import { useToast } from '@/components/toast'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetFooter } from '@/components/ui/sheet'
+import { countViewers, loadClient } from '@/remote/api'
+import { captchaEnabled } from '@/remote/captcha'
 import { checkInviteCode, codeMessage, normalizeInviteCode } from '@/remote/invite'
 import { formatSyncTime } from '@/remote/format'
 import { useRemote, type SharedGroup } from '@/remote/provider'
+import { CaptchaBox } from './captcha-box'
+import { PrivacyHint } from './privacy-hint'
 import { InviteSheet } from './invite-sheet'
+import { ManageSheet } from './manage-sheet'
 
 /**
  * 설정의 "공유 그룹" 카드. 서버 연결이 설정된 빌드에서만 보인다(환경 변수가 없으면 아무것도 그리지 않는다).
@@ -21,6 +26,8 @@ export function SharedCard() {
   const [outOpen, setOutOpen] = useState(false)
   const [leaving, setLeaving] = useState<SharedGroup | null>(null)
   const [inviting, setInviting] = useState<SharedGroup | null>(null)
+  const [managing, setManaging] = useState<SharedGroup | null>(null)
+  const [delOpen, setDelOpen] = useState(false)
 
   if (!remote.enabled) return null
   const { user, groups } = remote
@@ -64,17 +71,34 @@ export function SharedCard() {
                 <p className="text-xs text-ink-2">
                   {s.role === 'owner' ? '그룹장' : '보기 전용'} · 업데이트 {formatSyncTime(s.fetchedAt)}
                 </p>
+                {s.role === 'owner' && (remote.requests[s.group.id]?.length ?? 0) > 0 && (
+                  <p className="text-xs font-bold text-caramel-ink">참여 요청 {remote.requests[s.group.id].length}건 · 관리에서 승인해 주세요</p>
+                )}
               </div>
               {s.role === 'owner' && (
-                <Button size="sm" variant="soft" onClick={() => setInviting(s)} aria-label={`${s.group.name} 초대 코드 관리`}>
-                  <UserPlus size={16} /> 초대
-                </Button>
+                <>
+                  <Button size="sm" variant="soft" onClick={() => setInviting(s)} aria-label={`${s.group.name} 초대 코드 관리`}>
+                    <UserPlus size={16} /> 초대
+                  </Button>
+                  <Button size="sm" variant="soft" onClick={() => setManaging(s)} aria-label={`${s.group.name} 그룹 관리`}>
+                    <Settings2 size={16} /> 관리
+                  </Button>
+                </>
               )}
               {s.role === 'viewer' && (
                 <Button size="sm" variant="ghost" onClick={() => setLeaving(s)}>
                   나가기
                 </Button>
               )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {remote.myRequests.length > 0 && (
+        <ul className="mb-3 space-y-1.5">
+          {remote.myRequests.map((r) => (
+            <li key={r.groupId} className="flex items-center gap-2 rounded-2xl bg-surface-2 px-3 py-2 text-[13px] font-semibold text-ink-2">
+              <Hourglass size={16} aria-hidden className="shrink-0" /> {r.name} · 그룹장의 승인을 기다리는 중이에요
             </li>
           ))}
         </ul>
@@ -96,9 +120,16 @@ export function SharedCard() {
             로그아웃
           </Button>
         )}
+        {user && (
+          <Button variant="ghost" className="w-full text-danger" onClick={() => setDelOpen(true)}>
+            계정 삭제
+          </Button>
+        )}
       </div>
 
       <InviteSheet shared={inviting} onClose={() => setInviting(null)} />
+      <ManageSheet shared={managing ? (groups.find((x) => x.group.id === managing.group.id) ?? null) : null} onClose={() => setManaging(null)} />
+      <DeleteAccountSheet open={delOpen} onClose={() => setDelOpen(false)} onManage={(s) => setManaging(s)} />
       <JoinSheet open={joinOpen} onClose={() => setJoinOpen(false)} />
       <GoogleSheet open={googleOpen} onClose={() => setGoogleOpen(false)} />
 
@@ -150,6 +181,113 @@ export function SharedCard() {
   )
 }
 
+/**
+ * 계정 삭제. 내가 그룹장인 그룹은 서버에서 함께 지워지므로, 그룹원이 있는 그룹이 있으면
+ * 삭제 전에 그룹장 넘기기를 먼저 권한다(그룹 관리 열기).
+ */
+function DeleteAccountSheet({ open, onClose, onManage }: { open: boolean; onClose: () => void; onManage: (s: SharedGroup) => void }) {
+  const remote = useRemote()
+  const toast = useToast()
+  const owned = remote.groups.filter((s) => s.role === 'owner')
+  const [counts, setCounts] = useState<Record<string, number> | null>(null)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const ownedKey = owned.map((s) => s.group.id).join(',')
+
+  useEffect(() => {
+    if (!open) return
+    setTyped('')
+    setError(null)
+    setCounts(null)
+    if (!owned.length) return setCounts({})
+    let cancelled = false
+    void loadClient()
+      .then(async (c) => {
+        const entries = await Promise.all(owned.map(async (s) => [s.group.id, await countViewers(c, s.group.id)] as const))
+        if (!cancelled) setCounts(Object.fromEntries(entries))
+      })
+      .catch(() => {
+        if (!cancelled) setCounts(null)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, ownedKey])
+
+  const withViewers = owned.filter((s) => (counts?.[s.group.id] ?? 0) > 0)
+  const ok = typed.trim() === '계정 삭제'
+
+  const go = async () => {
+    setBusy(true)
+    setError(null)
+    const r = await remote.deleteAccount()
+    setBusy(false)
+    if (!r.ok) return setError(r.message ?? '계정을 지우지 못했어요')
+    toast({ message: '계정과 서버 데이터를 지웠어요', duration: 4000 })
+    onClose()
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="계정을 삭제할까요?" description="서버에 있는 내 정보가 즉시 지워져요">
+      <div className="space-y-3">
+        <p className="rounded-2xl bg-surface-2 p-3 text-[13px] leading-relaxed text-ink-2">
+          계정을 지우면 <b>내가 그룹장인 서버 그룹{owned.length ? ` ${owned.length}개` : ''}의 멤버·기록·금액·주문이 모두 즉시 지워지고 되돌릴 수 없어요.</b> 참여한 그룹에서는 내가 빠지고, 로그인 정보와 이 기기에 저장된 공유 그룹 내용이 지워져요. 내 기기 그룹은 지워지지 않아요.
+        </p>
+        {withViewers.length > 0 && (
+          <div role="alert" className="rounded-2xl border border-danger/40 p-3 text-[13px] leading-relaxed">
+            <p className="font-semibold text-danger">그룹원이 있는 그룹이 있어요</p>
+            <p className="mt-1 text-ink-2">계정을 지우면 그룹원도 더 이상 볼 수 없어요. 삭제하기 전에 <b>그룹장 넘기기</b>를 먼저 해 주세요.</p>
+            <ul className="mt-2 space-y-1.5">
+              {withViewers.map((s) => (
+                <li key={s.group.id} className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-semibold">
+                    {s.group.emoji} {s.group.name} · 그룹원 {counts?.[s.group.id]}명
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => {
+                      onClose()
+                      onManage(s)
+                    }}
+                  >
+                    그룹장 넘기기
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <label className="block text-[13px] font-semibold text-ink-2">
+          확인하려면 <b className="text-ink">계정 삭제</b>라고 입력해 주세요
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            aria-label="계정 삭제 확인"
+            autoComplete="off"
+            className="mt-2 min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-[16px] font-semibold text-ink"
+          />
+        </label>
+        {error && (
+          <p role="alert" className="text-[13px] font-semibold text-danger">
+            {error}
+          </p>
+        )}
+        <SheetFooter className="flex gap-2">
+          <Button variant="soft" size="lg" className="flex-1" onClick={onClose}>
+            취소
+          </Button>
+          <Button variant="danger" size="lg" className="flex-1" disabled={!ok || busy || !remote.online} onClick={() => void go()}>
+            {busy ? '지우는 중…' : '계정 삭제'}
+          </Button>
+        </SheetFooter>
+      </div>
+    </Sheet>
+  )
+}
+
 function AgeCheck({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl bg-surface-2 px-4 py-2.5">
@@ -164,10 +302,16 @@ function JoinSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast()
   const [code, setCode] = useState('')
   const [adult, setAdult] = useState(false)
+  const [nickname, setNickname] = useState('')
+  const [token, setToken] = useState<string | null>(null)
+  const [captchaKey, setCaptchaKey] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const needCaptcha = captchaEnabled && !remote.user // 로그인하기 전(익명 계정을 새로 만들 때)에만 사람 확인이 필요하다
 
   const close = () => {
+    setNickname('')
+    setToken(null)
     setCode('')
     setAdult(false)
     setError(null)
@@ -178,11 +322,15 @@ function JoinSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
     const c = checkInviteCode(code)
     if (!c.ok) return setError(codeMessage(c.reason))
     if (!adult) return setError('만 14세 이상만 참여할 수 있어요')
+    if (needCaptcha && !token) return setError('사람 확인이 끝나면 참여할 수 있어요')
     setBusy(true)
     setError(null)
-    const r = await remote.join(c.code)
+    const r = await remote.join(c.code, { nickname, captchaToken: needCaptcha ? (token ?? undefined) : undefined })
     setBusy(false)
-    if (!r.ok) return setError(r.message)
+    if (!r.ok) {
+      setCaptchaKey((k) => k + 1) // 토큰은 한 번만 쓸 수 있어 새로 받는다
+      return setError(r.message)
+    }
     toast({
       message: r.pending ? '참여 요청을 보냈어요. 그룹장이 승인하면 볼 수 있어요' : `${r.name ?? '그룹'}에 참여했어요`,
       duration: 3500,
@@ -211,7 +359,20 @@ function JoinSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           placeholder="예) K7M2QX4P"
           className="min-h-14 w-full rounded-2xl border border-line bg-surface-2 px-4 text-center text-xl font-bold tracking-[0.25em] placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-ink-2/70"
         />
+        <label className="block text-[13px] font-semibold text-ink-2">
+          내 별명 (선택)
+          <input
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value.slice(0, 20))}
+            maxLength={20}
+            aria-label="내 별명"
+            placeholder="그룹장이 알아볼 수 있는 이름"
+            className="mt-1.5 min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-[16px] font-semibold text-ink placeholder:font-normal placeholder:text-ink-2/70"
+          />
+          <PrivacyHint kind="name" />
+        </label>
         <AgeCheck checked={adult} onChange={setAdult} />
+        {needCaptcha && <CaptchaBox onToken={setToken} resetKey={captchaKey} />}
         <p className="text-[13px] leading-relaxed text-ink-2">
           참여하면 이 그룹의 별명·기록을 볼 수 있어요. 서버에는 그룹 내용이 저장되고, 그룹에 속한 사람만 볼 수 있어요.
         </p>
@@ -222,7 +383,7 @@ function JoinSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         )}
         <SheetFooter>
           {/* SheetFooter는 시트 아래쪽 영역으로 옮겨 그려져서 폼 안의 submit 버튼이 폼과 연결되지 않는다 → 클릭 핸들러로 처리 */}
-          <Button size="lg" className="w-full" type="button" onClick={() => void submit()} disabled={busy}>
+          <Button size="lg" className="w-full" type="button" onClick={() => void submit()} disabled={busy || (needCaptcha && !token)}>
             {busy ? '확인하는 중…' : '참여하기'}
           </Button>
         </SheetFooter>

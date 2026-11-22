@@ -20,6 +20,7 @@ import {
   normalizeInviteCode,
   type InviteRow,
 } from './invite'
+import { viewerLabel } from './admin-api'
 import { parseSnapshot, SnapshotError } from './snapshot'
 
 class MemoryStorage implements StorageLike {
@@ -226,5 +227,13 @@ describe('초대 코드 만들기 기본값과 상태', () => {
     expect(text).toContain('https://example.test/app/')
     expect(text).toContain('보기만')
     expect(text.split('\n')).toHaveLength(4)
+  })
+})
+
+describe('그룹원 표시 이름', () => {
+  it('별명이 있으면 별명, 없으면 들어온 순서대로 "그룹원 N"', () => {
+    expect(viewerLabel({ nickname: '민수' }, 0)).toBe('민수')
+    expect(viewerLabel({ nickname: null }, 0)).toBe('그룹원 1')
+    expect(viewerLabel({ nickname: '   ' }, 2)).toBe('그룹원 3')
   })
 })

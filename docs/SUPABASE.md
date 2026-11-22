@@ -42,6 +42,7 @@
 | `supabase/migrations/0003_group_snapshot.sql` | `get_group_snapshot`(그룹 전체를 한 번에 읽기) | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0004_apply_group_ops.sql` | `groups.rev`(충돌 감지) + `apply_group_ops`(그룹장 쓰기를 한 트랜잭션으로) | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0005_rev_bump.sql` | 내용이 바뀌는 모든 경로(직접 쓰기·그룹 설정·그룹장 넘기기)에서 `groups.rev`가 오르게 하는 트리거 (Realtime 신호) | 테스트·운영 프로젝트 모두 |
+| `supabase/migrations/0006_membership_signal.sql` | 별명(`nickname`), 참여 요청 승인(인원 제한 포함), 소속 변경 신호(`profiles.membership_rev` + Realtime) — 내보내진 그룹원·삭제된 그룹을 바로 알게 함 | 테스트·운영 프로젝트 모두 |
 | `supabase/test-only/sentinel.sql` | "테스트 프로젝트" 표식(`is_test_project()`) | **테스트 프로젝트에만** |
 | `tests/rls/*` | RLS·RPC·왕복·스냅샷 검증 (`npm run test:rls`) | 테스트 프로젝트 |
 | `scripts/seed-test.ts` | 샘플 그룹 + 초대 코드 넣기 (`npm run seed:test`) | 테스트 프로젝트 |
@@ -53,7 +54,8 @@
 3. `0003_group_snapshot.sql`
 4. `0004_apply_group_ops.sql`
 5. `0005_rev_bump.sql`
-6. (테스트 프로젝트만) `test-only/sentinel.sql`
+6. `0006_membership_signal.sql`
+7. (테스트 프로젝트만) `test-only/sentinel.sql`
 
 새 마이그레이션이 생기면 번호 순서대로 이어서 적용한다. 이미 적용한 파일은 다시 Run하지 않는다(`0001`은 다시 돌리면 "already exists" 오류가 난다).
 ### 적용 확인 쿼리 (SQL Editor에서 한 줄씩 Run → 결과가 `true`(또는 13)이면 적용된 것)
@@ -64,6 +66,7 @@
 | `0003_group_snapshot.sql` | `select to_regprocedure('public.get_group_snapshot(uuid)') is not null as ok;` | `true` |
 | `0004_apply_group_ops.sql` | `select exists(select 1 from information_schema.columns where table_schema='public' and table_name='groups' and column_name='rev') and to_regprocedure('public.apply_group_ops(uuid,bigint,jsonb)') is not null as ok;` | `true` |
 | `0005_rev_bump.sql` | `select to_regprocedure('public.groups_rev_guard()') is not null and exists(select 1 from pg_trigger where tgname='records_rev_ins') and exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='groups') as ok;` | `true` |
+| `0006_membership_signal.sql` | `select exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='membership_rev') and to_regprocedure('public.redeem_invite(text,text)') is not null and to_regprocedure('public.redeem_invite(text)') is null and exists(select 1 from pg_trigger where tgname='group_members_signal') and exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='profiles') as ok;` | `true` |
 | `test-only/sentinel.sql` (테스트만) | `select public.is_test_project();` | `true` |
 
 새 SQL 파일을 만들 때마다 **한 줄 확인 쿼리를 이 표와 채팅에 같이 적는다**(새 함수·컬럼이 있는지 조회). "Success"만으로는 적용 여부를 알 수 없다(실제로 다른 프로젝트·다른 내용에 실행한 적이 있었다).
