@@ -3,7 +3,8 @@
  * 알림 내용은 믿지 않고 "다시 읽어라"는 신호로만 쓴다 → 읽기는 기존 get_group_snapshot(RLS 적용, 일관된 스냅샷).
  *  - 내가 막 저장해서 생긴 알림(rev가 이미 아는 값 이하)은 무시한다.
  *  - 짧은 시간에 여러 번 오면 한 번으로 묶는다(debounce).
- *  - 연결이 끊겼다가 돌아오면 한 번 다시 읽는다(놓친 알림 보충).
+ *  - 구독이 SUBSCRIBED(live)가 될 때마다 한 번 다시 읽는다: 처음 연결 때도 포함한다. 앱이 마지막으로 읽은 시점과
+ *    구독이 실제로 켜진 시점 사이에 생긴 변경, 끊긴 동안 놓친 변경을 모두 보충한다(여러 채널의 live는 한 번으로 묶인다).
  */
 
 export type RealtimeState = 'off' | 'connecting' | 'live' | 'down'
@@ -37,7 +38,7 @@ export function createRealtimeSync(d: RealtimeDeps): RealtimeSync {
   const setTimer = d.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
   const clearTimer = d.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>))
   const debounceMs = d.debounceMs ?? 800
-  const chans = new Map<string, { off: () => void; status: ChannelStatus | 'connecting'; wasDown: boolean }>()
+  const chans = new Map<string, { off: () => void; status: ChannelStatus | 'connecting' }>()
   let timer: unknown = null
   let last: RealtimeState = 'off'
 
@@ -73,7 +74,7 @@ export function createRealtimeSync(d: RealtimeDeps): RealtimeSync {
       }
       for (const gid of want) {
         if (chans.has(gid)) continue
-        const entry = { off: () => {}, status: 'connecting' as ChannelStatus | 'connecting', wasDown: false }
+        const entry = { off: () => {}, status: 'connecting' as ChannelStatus | 'connecting' }
         chans.set(gid, entry)
         entry.off = d.open(
           gid,
@@ -87,11 +88,7 @@ export function createRealtimeSync(d: RealtimeDeps): RealtimeSync {
           (s) => {
             const prev = entry.status
             entry.status = s
-            if (s === 'down') entry.wasDown = true
-            if (s === 'live' && (prev === 'down' || entry.wasDown)) {
-              entry.wasDown = false
-              schedule() // 끊긴 동안 놓친 변경을 보충
-            }
+            if (s === 'live' && prev !== 'live') schedule() // 구독이 켜지기 전·끊긴 동안 생긴 변경을 보충
             publish()
           },
         )

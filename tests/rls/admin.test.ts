@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { assertNotProduction, configured, joinAsViewer, mustRpc, newUser, seedGroup, type TestUser } from './helpers'
+import { assertNotProduction, configured, joinAsViewer, mustRpc, newUser, seedGroup, sharedUser, type TestUser } from './helpers'
 
 /**
  * supabase/migrations/0006_membership_signal.sql 이 적용돼 있어야 한다.
@@ -205,11 +205,17 @@ d('Realtime: 소속 변경 알림', () => {
       })
     return {
       count: () => count,
-      ready: async () => {
+      /** SUBSCRIBED를 기다린 뒤, 무해한 변경을 일으켜 알림이 실제로 도착하는지(변경 감지 준비 완료) 확인한다 */
+      ready: async (probe: () => Promise<unknown>) => {
         for (let i = 0; i < 60 && status !== 'SUBSCRIBED'; i++) await new Promise((r) => setTimeout(r, 250))
         if (status !== 'SUBSCRIBED') throw new Error('Realtime 구독 실패: ' + status)
-        // SUBSCRIBED가 된 직후에는 변경 감지가 아직 준비 중일 수 있어 잠깐 기다린다(전체 실행에서 드물게 첫 알림을 놓치던 현상)
-        await new Promise((r) => setTimeout(r, 1500))
+        for (let i = 0; i < 20; i++) {
+          const n = count
+          await probe()
+          for (let t = 0; t < 1500 && count === n; t += 100) await new Promise((r) => setTimeout(r, 100))
+          if (count > n) return
+        }
+        throw new Error('Realtime 변경 감지가 준비되지 않았어요')
       },
       close: () => void c.removeChannel(ch),
     }
@@ -227,10 +233,10 @@ d('Realtime: 소속 변경 알림', () => {
 
   it('내보내진 그룹원이 몇 초 안에 알림을 받는다', async () => {
     const { gid } = await seedGroup(owner)
-    const v = await newUser()
+    const v = await sharedUser('rt-viewer')
     await joinAsViewer(owner, gid, v)
     const l = listenMe(v.client, v.id)
-    await l.ready()
+    await l.ready(() => mustRpc(v.client, 'confirm_age', { p_terms_version: 'probe' }))
     const before = l.count()
     await mustRpc(owner.client, 'remove_viewer', { p_group: gid, p_user: v.id })
     expect(await until(() => l.count() > before)).toBe(true)
@@ -239,10 +245,10 @@ d('Realtime: 소속 변경 알림', () => {
 
   it('그룹이 삭제되면 그룹원이 알림을 받는다', async () => {
     const { gid } = await seedGroup(owner)
-    const v = await newUser()
+    const v = await sharedUser('rt-viewer')
     await joinAsViewer(owner, gid, v)
     const l = listenMe(v.client, v.id)
-    await l.ready()
+    await l.ready(() => mustRpc(v.client, 'confirm_age', { p_terms_version: 'probe' }))
     const before = l.count()
     await mustRpc(owner.client, 'delete_group', { p_group: gid })
     expect(await until(() => l.count() > before)).toBe(true)
@@ -255,7 +261,7 @@ d('Realtime: 소속 변경 알림', () => {
     const code = await invite(owner, gid, true)
     const lo = listenMe(owner.client, owner.id)
     const lv = listenMe(v.client, v.id)
-    await Promise.all([lo.ready(), lv.ready()])
+    await Promise.all([lo.ready(() => mustRpc(owner.client, 'confirm_age', { p_terms_version: 'probe' })), lv.ready(() => mustRpc(v.client, 'confirm_age', { p_terms_version: 'probe' }))])
     const o0 = lo.count()
     await mustRpc(v.client, 'redeem_invite', { p_code: code, p_nickname: '새 사람' })
     expect(await until(() => lo.count() > o0)).toBe(true)

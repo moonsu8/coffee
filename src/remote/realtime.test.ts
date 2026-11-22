@@ -75,14 +75,28 @@ describe('realtime 동기화', () => {
     expect(h.refreshes()).toBe(3)
   })
 
-  it('연결이 끊겼다가 돌아오면 한 번 다시 읽는다 (처음 연결은 읽지 않는다)', () => {
+  it('구독이 켜질 때마다 한 번 다시 읽는다: 처음 연결 직후와 끊겼다 돌아온 때 (구독 전에 생긴 변경 보충)', () => {
     const h = harness()
     h.rt.sync(['a'])
+    expect(h.hasTimer()).toBe(false) // 아직 연결 중
     h.handlers.get('a')!.st('live')
+    expect(h.hasTimer()).toBe(true)
+    h.fire()
+    expect(h.refreshes()).toBe(1)
+    h.handlers.get('a')!.st('live') // 같은 상태가 반복돼도 또 읽지 않는다
     expect(h.hasTimer()).toBe(false)
     h.handlers.get('a')!.st('down')
     h.handlers.get('a')!.st('live')
-    expect(h.hasTimer()).toBe(true)
+    h.fire()
+    expect(h.refreshes()).toBe(2)
+  })
+
+  it('여러 그룹이 동시에 켜져도 다시 읽기는 한 번으로 묶인다', () => {
+    const h = harness()
+    h.rt.sync(['a', 'b', 'me:u'])
+    h.handlers.get('a')!.st('live')
+    h.handlers.get('b')!.st('live')
+    h.handlers.get('me:u')!.st('live')
     h.fire()
     expect(h.refreshes()).toBe(1)
   })

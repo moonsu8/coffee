@@ -32,7 +32,10 @@
 - 익명 사용자 자동 정리는 **제공되지 않는다.** 문서의 SQL로 직접 지운다:
   `delete from auth.users where is_anonymous is true and created_at < now() - interval '30 days';`
   (이 앱은 계정이 삭제되면 데이터도 같이 지우는 정책이라, 오래 안 쓴 익명 계정 정리 기준은 처리방침과 함께 정한다.)
-- RLS 테스트는 한 번 돌릴 때 익명 사용자를 20명 안팎 만든다. 테스트 프로젝트에서 이 한도를 올려 두거나(예: 시간당 300), 두 번 연속 돌리지 않는다.
+- RLS 테스트는 한 번 돌릴 때 익명 사용자를 **60~70명** 만든다(같은 파일 안에서는 가능한 곳에서 사용자를 재사용한다: `tests/rls/helpers.ts`의 `sharedUser`). 그래서 **테스트 프로젝트(coffee-test)에서만** 대시보드 Authentication > Rate Limits의 두 값을 올려 둔다. 운영 프로젝트는 기본값을 유지한다.
+  - **Anonymous users(IP당 시간당)**: 30 → **300**
+  - **Sign-ups and sign-ins(IP당 5분당)**: 30 → **300** (익명 로그인도 로그인으로 세어진다. 이 값이 낮으면 `over_request_rate_limit`(429)이 난다)
+  - 올려도 한 시간에 약 4번 정도만 전체를 돌릴 수 있다. 막히면(`익명 로그인 실패: Request rate limit reached`) 창이 지나길 기다린다. 실패한 시도도 횟수에 들어가니 연달아 다시 돌리지 않는다.
 
 ## 2. 파일 구성
 | 파일 | 용도 | 어디에 적용 |

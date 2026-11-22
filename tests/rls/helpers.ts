@@ -96,3 +96,18 @@ export async function readRows(user: TestUser, gid: string): Promise<GroupRows> 
     prices: await one(c.from('prices').select('*').eq('group_id', gid).maybeSingle()),
   }
 }
+
+/**
+ * 같은 파일(테스트 프로세스) 안에서 사용자 한 명을 재사용한다. 익명 로그인에는 시간당·5분당 한도가 있어서,
+ * "매번 새 그룹을 만드는" 테스트(소속이 이전 테스트에 영향을 받지 않는 경우)에서만 쓴다.
+ * 참여·내보내기처럼 사용자의 소속 상태 자체를 검사하는 테스트는 새 사용자를 쓴다.
+ */
+const shared = new Map<string, Promise<TestUser>>()
+export function sharedUser(key: string): Promise<TestUser> {
+  let p = shared.get(key)
+  if (!p) {
+    p = newUser()
+    shared.set(key, p)
+  }
+  return p
+}

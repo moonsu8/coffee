@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { assertNotProduction, configured, joinAsViewer, mustRpc, newUser, seedGroup, type TestUser } from './helpers'
+import { assertNotProduction, configured, joinAsViewer, mustRpc, newUser, seedGroup, sharedUser, type TestUser } from './helpers'
 
 /**
  * supabase/migrations/0005_rev_bump.sql 이 적용돼 있어야 한다.
@@ -157,11 +157,18 @@ d('Realtime: groups.rev 알림', () => {
       .subscribe((s) => {
         status = s
       })
-    const ready = async () => {
+    /** SUBSCRIBED를 기다린 뒤, probe(무해한 변경)로 알림이 실제로 도착하는지 확인한다. probe가 없으면 SUBSCRIBED만 본다 */
+    const ready = async (probe?: () => Promise<unknown>) => {
       for (let i = 0; i < 60 && status !== 'SUBSCRIBED'; i++) await new Promise((r) => setTimeout(r, 250))
       if (status !== 'SUBSCRIBED') throw new Error('Realtime 구독 실패: ' + status)
-      // SUBSCRIBED가 된 직후에는 변경 감지가 아직 준비 중일 수 있어 잠깐 기다린다(전체 실행에서 드물게 첫 알림을 놓치던 현상)
-      await new Promise((r) => setTimeout(r, 1500))
+      if (!probe) return
+      for (let i = 0; i < 20; i++) {
+        const n = events.length
+        await probe()
+        for (let t = 0; t < 1500 && events.length === n; t += 100) await new Promise((r) => setTimeout(r, 100))
+        if (events.length > n) return
+      }
+      throw new Error('Realtime 변경 감지가 준비되지 않았어요')
     }
     return { events, ready, close: () => void c.removeChannel(ch) }
   }
@@ -182,7 +189,9 @@ d('Realtime: groups.rev 알림', () => {
   it('그룹장이 쓰면(apply_group_ops) 그룹원이 새 rev 알림을 받고, 소속 아닌 사람은 못 받는다', async () => {
     const v = listen(viewer.client, gid)
     const s = listen(stranger.client, gid)
-    await Promise.all([v.ready(), s.ready()])
+    // 그룹원 쪽은 실제 알림이 도착하는지 확인하고, 소속이 아닌 사람 쪽은 구독 상태만 본다(받으면 안 되는 쪽이라 probe 불가)
+    const probe = () => owner.client.from('groups').update({ config: { probe: Math.random() } }).eq('id', gid)
+    await Promise.all([v.ready(probe), s.ready()])
     const base = await revOf(owner, gid)
     const res = await mustRpc<{ status: string; rev: number }>(owner.client, 'apply_group_ops', {
       p_group: gid,
@@ -199,7 +208,7 @@ d('Realtime: groups.rev 알림', () => {
 
   it('직접 쓰기(이름 변경)도 알림이 간다', async () => {
     const v = listen(viewer.client, gid)
-    await v.ready()
+    await v.ready(() => owner.client.from('groups').update({ config: { probe: Math.random() } }).eq('id', gid))
     const base = await revOf(owner, gid)
     const { error } = await owner.client.from('groups').update({ name: '알림 확인' }).eq('id', gid)
     expect(error?.message).toBeUndefined()
@@ -212,8 +221,8 @@ d('그룹이 사라지거나 내가 빠졌을 때 (앱의 "그룹이 없어졌�
   const memberOf = async (u: TestUser) => ((await u.client.from('group_members').select('group_id').eq('user_id', u.id)).data ?? []).map((m) => m.group_id as string)
 
   it('그룹 삭제: 그룹원의 소속 목록·스냅샷에서 사라지고 데이터가 지워진다', async () => {
-    const owner = await newUser()
-    const viewer = await newUser()
+    const owner = await sharedUser('gone-owner')
+    const viewer = await sharedUser('gone-viewer')
     const { gid } = await seedGroup(owner)
     await joinAsViewer(owner, gid, viewer)
     expect(await memberOf(viewer)).toContain(gid)
@@ -229,8 +238,8 @@ d('그룹이 사라지거나 내가 빠졌을 때 (앱의 "그룹이 없어졌�
   })
 
   it('그룹장이 내보내면: 그룹원의 소속 목록에서 사라지고 스냅샷은 null', async () => {
-    const owner = await newUser()
-    const viewer = await newUser()
+    const owner = await sharedUser('gone-owner')
+    const viewer = await sharedUser('gone-viewer')
     const { gid } = await seedGroup(owner)
     await joinAsViewer(owner, gid, viewer)
     await mustRpc(owner.client, 'remove_viewer', { p_group: gid, p_user: viewer.id })
@@ -239,8 +248,8 @@ d('그룹이 사라지거나 내가 빠졌을 때 (앱의 "그룹이 없어졌�
   })
 
   it('스스로 나가면 마찬가지', async () => {
-    const owner = await newUser()
-    const viewer = await newUser()
+    const owner = await sharedUser('gone-owner')
+    const viewer = await sharedUser('gone-viewer')
     const { gid } = await seedGroup(owner)
     await joinAsViewer(owner, gid, viewer)
     await mustRpc(viewer.client, 'leave_group', { p_group: gid })

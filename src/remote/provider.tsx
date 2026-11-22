@@ -218,6 +218,7 @@ function Inner({ children }: { children: ReactNode }) {
   const cacheRef = useRef(cache)
   cacheRef.current = cache
   const busy = useRef(false)
+  const rerun = useRef(false)
   const lastRun = useRef(0)
   const writers = useRef(new Map<string, Writer>())
   const refreshRef = useRef<() => Promise<void>>(async () => {})
@@ -266,7 +267,10 @@ function Inner({ children }: { children: ReactNode }) {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (busy.current) return
+    if (busy.current) {
+      rerun.current = true // 읽는 중에 새 신호가 오면(구독이 켜지는 순간 등) 끝난 뒤 한 번 더 읽는다
+      return
+    }
     // 저장 중인 변경이 있으면 서버 내용으로 덮어쓰지 않는다(저장이 끝난 뒤 다음 갱신 때 반영)
     if (anyWriting()) return
     // 기기가 오프라인이라고 알려 주면 요청(재시도 포함)을 기다리지 않고 바로 캐시 표시 상태로 둔다
@@ -319,6 +323,10 @@ function Inner({ children }: { children: ReactNode }) {
     } finally {
       busy.current = false
       setRefreshing(false)
+      if (rerun.current) {
+        rerun.current = false
+        setTimeout(() => void refreshRef.current(), 0)
+      }
     }
   }, [commit, loadRequests])
   refreshRef.current = refresh
