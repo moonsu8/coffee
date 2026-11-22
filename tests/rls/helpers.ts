@@ -7,13 +7,21 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *  - service_role 키는 쓰지 않는다. 사용자는 익명 로그인으로 만든다.
  */
 
-export const TEST_URL = process.env.SUPABASE_TEST_URL ?? ''
+// 대시보드에서 .../rest/v1/ 같은 경로까지 복사해도 동작하도록 origin만 쓴다
+const origin = (u: string | undefined) => {
+  try {
+    return u ? new URL(u.trim()).origin : ''
+  } catch {
+    return ''
+  }
+}
+export const TEST_URL = origin(process.env.SUPABASE_TEST_URL)
 export const TEST_KEY = process.env.SUPABASE_TEST_ANON_KEY ?? ''
 export const configured = Boolean(TEST_URL && TEST_KEY)
 
 /** 운영 값과 같은 주소를 가리키면 테스트를 거부한다 */
 export function assertNotProduction() {
-  const prod = [process.env.VITE_SUPABASE_URL, process.env.SUPABASE_PROD_URL].filter(Boolean)
+  const prod = [origin(process.env.VITE_SUPABASE_URL), origin(process.env.SUPABASE_PROD_URL)].filter(Boolean)
   if (prod.includes(TEST_URL)) throw new Error('SUPABASE_TEST_URL이 운영 프로젝트 주소와 같아요. 테스트를 중단합니다.')
 }
 
