@@ -160,6 +160,8 @@ d('Realtime: groups.rev 알림', () => {
     const ready = async () => {
       for (let i = 0; i < 60 && status !== 'SUBSCRIBED'; i++) await new Promise((r) => setTimeout(r, 250))
       if (status !== 'SUBSCRIBED') throw new Error('Realtime 구독 실패: ' + status)
+      // SUBSCRIBED가 된 직후에는 변경 감지가 아직 준비 중일 수 있어 잠깐 기다린다(전체 실행에서 드물게 첫 알림을 놓치던 현상)
+      await new Promise((r) => setTimeout(r, 1500))
     }
     return { events, ready, close: () => void c.removeChannel(ch) }
   }
