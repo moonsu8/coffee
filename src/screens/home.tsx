@@ -39,7 +39,7 @@ function relativeDays(from: string, to: string): string {
 }
 
 export function HomeScreen({ goSettings }: { goSettings: () => void }) {
-  const { data, terms, today, memberById, savePurchase, removePurchase, savePrices } = useStore()
+  const { data, terms, today, memberById, savePurchase, removePurchase, savePrices, access } = useStore()
   const isMoney = data.template === 'coffee'
   const toast = useToast()
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -55,7 +55,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           illustration={<EmptyArt />}
           title="아직 멤버가 없어요"
           body={terms.emptyMembers}
-          action={<Button onClick={goSettings}>멤버 추가하러 가기</Button>}
+          action={access.canWrite ? <Button onClick={goSettings}>멤버 추가하러 가기</Button> : undefined}
         />
       </div>
     )
@@ -189,7 +189,7 @@ export function HomeScreen({ goSettings }: { goSettings: () => void }) {
           </div>
 
           {/* 액션 */}
-          {buyer && (
+          {buyer && access.canWrite && (
             <div className="mt-5">
               {done ? (
                 <div className="flex gap-2">

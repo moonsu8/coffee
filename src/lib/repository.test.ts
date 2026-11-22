@@ -35,8 +35,9 @@ describe('로컬 저장 계층 (저장 형식이 바뀌지 않는다)', () => {
   it('저장 결과가 이전 saveData와 바이트까지 같다 (메인·shadow)', () => {
     const a = new MemoryStorage()
     const b = new MemoryStorage()
-    createLocalRepository(a).save(sample())
-    saveData(sample(), b)
+    const data = sample() // withGroupAdded가 현재 시각을 쓰므로 한 번만 만든다
+    createLocalRepository(a).save(data)
+    saveData(data, b)
     expect([...a.map.entries()]).toEqual([...b.map.entries()])
     expect([...a.map.keys()].sort()).toEqual([KEY, SHADOW_KEY].sort())
   })
@@ -56,9 +57,10 @@ describe('로컬 저장 계층 (저장 형식이 바뀌지 않는다)', () => {
 
   it('옛 앱 보호 표식(최상위 members: [])이 저장 JSON에 남는다', () => {
     const st = new MemoryStorage()
-    createLocalRepository(st).save(sample())
+    const data = sample()
+    createLocalRepository(st).save(data)
     expect(JSON.parse(st.getItem(KEY)!).members).toEqual([])
-    expect(st.getItem(KEY)).toBe(serialize(sample()))
+    expect(st.getItem(KEY)).toBe(serialize(data))
   })
 
   it('미래 버전 데이터는 읽지 않고 저장을 막는 상태로 돌려준다 (아무것도 쓰지 않음)', async () => {

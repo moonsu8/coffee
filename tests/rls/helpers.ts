@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { GroupRows } from '../../src/logic/remote-map'
 
 /**
  * RLS 테스트 공용 도우미. 반드시 "테스트 전용" Supabase 프로젝트에만 연결한다.
@@ -75,4 +76,23 @@ export async function joinAsViewer(owner: TestUser, gid: string, viewer: TestUse
   const res = await mustRpc<{ status: string }>(viewer.client, 'redeem_invite', { p_code: code })
   if (res.status !== 'joined') throw new Error(`참여 실패: ${res.status}`)
   return code
+}
+
+/** 테이블을 직접 읽어 행 묶음을 만든다 (스냅샷 RPC와 비교하는 기준) */
+export async function readRows(user: TestUser, gid: string): Promise<GroupRows> {
+  const c = user.client
+  const one = async <T>(q: PromiseLike<{ data: T | null; error: { message: string } | null }>) => {
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data as T
+  }
+  return {
+    group: await one(c.from('groups').select('id,name,emoji,schedule,config').eq('id', gid).single()),
+    members: await one(c.from('members').select('*').eq('group_id', gid)),
+    records: await one(c.from('records').select('*').eq('group_id', gid)),
+    absences: await one(c.from('absences').select('*').eq('group_id', gid)),
+    skip_days: await one(c.from('skip_days').select('*').eq('group_id', gid)),
+    orders: await one(c.from('orders').select('*').eq('group_id', gid)),
+    prices: await one(c.from('prices').select('*').eq('group_id', gid).maybeSingle()),
+  }
 }

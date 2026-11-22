@@ -18,13 +18,17 @@ import { nextSettlementDate, priceKey, reenablePlan, type ReenablePlan } from '@
 import { PRESET_MENUS } from '@/logic/menu'
 import { MEMBER_COLORS, MEMBER_EMOJIS, memberStyle, suggestStyle } from '@/lib/members'
 import { cn } from '@/lib/utils'
+import { SharedCard } from '@/components/shared-card'
+import { useRemote } from '@/remote/provider'
 import { useStore } from '@/store/store'
 import type { BuyerRule, Member, PriceEntry, PriceMode } from '@/types'
 
 type Editing = { mode: 'add' } | { mode: 'edit'; member: Member } | null
 
 export function SettingsScreen() {
-  const { data, root, groups, today, reorderMembers, removeMember, importJson, resetToInitial, restoreLastGood, addCustomMenu, removeCustomMenu } = useStore()
+  const { data, root, groups, today, reorderMembers, removeMember, importJson, resetToInitial, restoreLastGood, addCustomMenu, removeCustomMenu, access } = useStore()
+  const canWrite = access.canWrite
+  const remote = useRemote()
   const [menuInput, setMenuInput] = useState('')
   const toast = useToast()
   const [editing, setEditing] = useState<Editing>(null)
@@ -55,7 +59,10 @@ export function SettingsScreen() {
       <PageHeader title="설정" subtitle="SETTINGS" />
       <div className="space-y-5 px-5">
         <GroupsCard />
+        <SharedCard />
 
+        {canWrite && (
+          <>
         <Card className="p-4">
           <SectionTitle
             right={
@@ -136,6 +143,8 @@ export function SettingsScreen() {
         )}
         {data.template === 'coffee' && <BuyerRuleCard />}
         {data.hasOrders && <PriceListCard />}
+          </>
+        )}
 
         <Card>
           <SectionTitle>앱</SectionTitle>
@@ -169,7 +178,7 @@ export function SettingsScreen() {
           </Button>
         </Card>
         <UsageStats />
-        <p className="pb-2 text-center text-xs text-ink-2">커피 당번 · 서버 없이 이 브라우저에서만 동작해요</p>
+        <p className="pb-2 text-center text-xs text-ink-2">{remote.enabled ? '커피 당번 · 내 기기 그룹은 이 브라우저에만 저장돼요' : '커피 당번 · 서버 없이 이 브라우저에서만 동작해요'}</p>
       </div>
 
       <InstallSheet open={installOpen} onOpenChange={setInstallOpen} />

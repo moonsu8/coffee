@@ -158,7 +158,7 @@ d('공유 그룹 RLS', () => {
   })
 
   describe('초대', () => {
-    it('코드는 8자리이고 헷갈리는 글자(0 O 1 I L)가 없다', async () => {
+    it('코드는 8자리이고 헷갈리는 글자(0 O 1 I)가 없다', async () => {
       for (let i = 0; i < 5; i++) {
         const code = await mustRpc<string>(owner.client, 'create_invite', { p_group: gid })
         expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/)

@@ -22,11 +22,13 @@ import type { DateStr, Pricing } from '@/types'
 type View = 'calendar' | 'list'
 
 export function HistoryScreen() {
-  const { data, terms, today, memberById, removePurchase } = useStore()
+  const { data, terms, today, memberById, removePurchase, access } = useStore()
+  const canWrite = access.canWrite
   const toast = useToast()
   const [view, setView] = useState<View>('calendar')
   const [month, setMonth] = useState(monthKey(today))
-  const [editing, setEditing] = useState<DateStr | null>(null)
+  const [editingRaw, setEditing] = useState<DateStr | null>(null)
+  const editing = canWrite ? editingRaw : null // 읽기 전용 그룹은 수정 시트를 열지 않는다
 
   const monthPurchases = data.purchases.filter((p) => p.date.startsWith(month)).sort((a, b) => (a.date < b.date ? 1 : -1))
   const byDate = new Map(data.purchases.map((p) => [p.date, p]))
@@ -43,9 +45,11 @@ export function HistoryScreen() {
         title="기록"
         subtitle="HISTORY"
         right={
-          <Button size="sm" variant="dark" onClick={() => setEditing(today)}>
-            <Plus size={18} /> 기록 추가
-          </Button>
+          canWrite ? (
+            <Button size="sm" variant="dark" onClick={() => setEditing(today)}>
+              <Plus size={18} /> 기록 추가
+            </Button>
+          ) : undefined
         }
       />
       <div className="space-y-4 px-5">
@@ -105,7 +109,7 @@ export function HistoryScreen() {
                     illustration={<EmptyArt />}
                     title="이 달엔 아직 기록이 없어요"
                     body={terms.emptyHistory}
-                    action={<Button onClick={() => setEditing(today)}>오늘 기록하기</Button>}
+                    action={canWrite ? <Button onClick={() => setEditing(today)}>오늘 기록하기</Button> : undefined}
                   />
                 </Card>
               ) : (
@@ -116,7 +120,7 @@ export function HistoryScreen() {
                       const day = data.orders.find((o) => o.date === p.date)
                       return (
                         <li key={p.date} className="overflow-hidden rounded-[20px] bg-surface shadow-card">
-                          <SwipeRow label={`${formatShort(p.date)} ${m?.name ?? ''}`} onEdit={() => setEditing(p.date)} onDelete={() => del(p.date)}>
+                          <SwipeRow label={`${formatShort(p.date)} ${m?.name ?? ''}`} onEdit={() => setEditing(p.date)} onDelete={() => del(p.date)} disabled={!canWrite}>
                             <div className="flex min-h-[68px] items-center gap-3.5 px-4 py-3">
                               <Avatar member={m} size="md" />
                               <div className="min-w-0 flex-1">
@@ -134,7 +138,7 @@ export function HistoryScreen() {
                       )
                     })}
                   </ul>
-                  <p className="mt-3 text-center text-[13px] text-ink-2">← 왼쪽으로 밀면 수정·삭제</p>
+                  {canWrite && <p className="mt-3 text-center text-[13px] text-ink-2">← 왼쪽으로 밀면 수정·삭제</p>}
                 </>
               )}
             </motion.div>

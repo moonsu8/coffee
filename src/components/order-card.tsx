@@ -29,7 +29,7 @@ import { Sheet, SheetFooter } from './ui/sheet'
 
 /** 홈의 "오늘의 주문" 카드 */
 export function OrderCard({ date }: { date: DateStr }) {
-  const { data, memberById, snapshotOrder } = useStore()
+  const { data, memberById, snapshotOrder, access } = useStore()
   const toast = useToast()
   const [editing, setEditing] = useState<string | null>(null) // memberId
   const [fallback, setFallback] = useState<string | null>(null)
@@ -76,6 +76,7 @@ export function OrderCard({ date }: { date: DateStr }) {
             <li key={l.memberId}>
               <button
                 onClick={() => setEditing(l.memberId)}
+                disabled={!access.canWrite}
                 aria-label={`${m?.name} 메뉴 변경, 현재 ${lineLabel(l)}`}
                 className="flex min-h-12 w-full items-center gap-3 py-1.5 text-left"
               >

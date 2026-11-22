@@ -38,9 +38,21 @@
 | 파일 | 용도 | 어디에 적용 |
 |---|---|---|
 | `supabase/migrations/0001_init.sql` | 테이블, RLS, RPC, Realtime | 테스트·운영 프로젝트 모두 |
+| `supabase/migrations/0002_import_keep_ids.sql` | `import_group`이 uuid 멤버 id를 유지 | 테스트·운영 프로젝트 모두 |
+| `supabase/migrations/0003_group_snapshot.sql` | `get_group_snapshot`(그룹 전체를 한 번에 읽기) | 테스트·운영 프로젝트 모두 |
 | `supabase/test-only/sentinel.sql` | "테스트 프로젝트" 표식(`is_test_project()`) | **테스트 프로젝트에만** |
-| `tests/rls/*` | RLS·RPC 검증 (`npm run test:rls`) | 테스트 프로젝트 |
+| `tests/rls/*` | RLS·RPC·왕복·스냅샷 검증 (`npm run test:rls`) | 테스트 프로젝트 |
+| `scripts/seed-test.ts` | 샘플 그룹 + 초대 코드 넣기 (`npm run seed:test`) | 테스트 프로젝트 |
 | `.env.example` | 환경 변수 이름 | 복사해서 `.env.local`, `.env.test.local` |
+
+### 마이그레이션 적용 순서 (SQL Editor에서 새 쿼리 창마다 한 파일씩 Run)
+1. `0001_init.sql`
+2. `0002_import_keep_ids.sql`
+3. `0003_group_snapshot.sql`
+4. (테스트 프로젝트만) `test-only/sentinel.sql`
+
+새 마이그레이션이 생기면 번호 순서대로 이어서 적용한다. 이미 적용한 파일은 다시 Run하지 않는다(`0001`은 다시 돌리면 "already exists" 오류가 난다).
+적용 뒤에 함수가 안 보이면 SQL Editor에서 `notify pgrst, 'reload schema';` 를 한 번 실행한다.
 
 환경 변수 이름은 일부러 다르다. 서로 섞이면 안 된다.
 - 운영(앱에 들어가는 공개 값): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` → `.env.local`
@@ -65,9 +77,43 @@
 
 운영 프로젝트(나중): 같은 방법으로 생성 → `0001_init.sql`만 적용(sentinel은 적용하지 않음) → Pro로 올릴지 결정 → Google 로그인 설정(1-C에서 안내).
 
+## 3-1. 샘플 데이터 넣기 (테스트 프로젝트)
+1-C 단계의 앱에서 서버 그룹을 만들 수 없는 동안(1-C)에는 시드 스크립트로 읽기 전용 화면을 확인한다.
+```
+npm run seed:test              # 샘플 그룹 + 초대 코드(그룹장 승인 없이 참여)
+npm run seed:test -- --approval  # 그룹장 승인이 필요한 초대 코드
+```
+- `service_role` 키 없이, 익명 사용자 1명이 기존 RPC(`confirm_age` → `import_group` → `create_invite`)로 만든다.
+- 출력은 초대 코드와 그룹 이름뿐이다(이름은 가짜). 코드는 30일, 최대 200명 사용 가능.
+- 이 익명 그룹장은 세션을 저장하지 않아 다시 로그인할 수 없다. **보기 전용 확인용 그룹**이다. 그룹장 기능(1-D)은 Google 로그인으로 따로 만든 그룹으로 확인한다.
+- 앱에서 쓰려면 `.env.local`에 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`(테스트 프로젝트의 공개 값)를 넣고 `npm run dev` → 설정 > 공유 그룹 > 초대 코드로 참여.
+
+## 3-2. 테스트로 쌓이는 익명 사용자 정리
+`npm run test:rls`와 `npm run seed:test`는 실행할 때마다 익명 사용자를 만든다(Supabase는 자동 정리가 없다). **테스트 프로젝트에서만** 가끔 정리한다.
+
+대시보드 **SQL Editor**(DB 비밀번호·service_role 키 필요 없음)에서:
+```sql
+-- 1) 먼저 개수 확인 (미리보기)
+select count(*) as anon_users from auth.users where is_anonymous is true and created_at < now() - interval '1 day';
+select count(*) as groups_owned_by_them
+from public.group_members gm join auth.users u on u.id = gm.user_id
+where gm.role = 'owner' and u.is_anonymous is true and u.created_at < now() - interval '1 day';
+
+-- 2) 하루 이상 지난 익명 사용자의 그룹과 계정을 삭제 (그룹은 cascade로 모든 데이터가 함께 지워진다)
+delete from public.groups where id in (
+  select gm.group_id from public.group_members gm join auth.users u on u.id = gm.user_id
+  where gm.role = 'owner' and u.is_anonymous is true and u.created_at < now() - interval '1 day'
+);
+delete from auth.users where is_anonymous is true and created_at < now() - interval '1 day';
+```
+- 시드로 만든 샘플 그룹도 지워진다 → 다시 `npm run seed:test`로 만들고 새 코드를 쓴다.
+- 대시보드로 하려면 Authentication → Users 에서 목록을 보고 선택 삭제할 수도 있다.
+- **운영 프로젝트에서는 이 SQL을 실행하지 않는다.** (운영에는 실제 그룹원이 익명 계정이다.) 운영의 오래된 익명 계정 정리 기준은 처리방침과 함께 따로 정한다.
+- 익명 로그인이 막히면(IP당 시간당 30회) Authentication → Rate Limits 에서 한도를 올리거나 1시간 뒤에 다시 한다.
+
 ## 4. 검증 상태 (정직하게)
-- SQL은 PostgreSQL 파서(pglast)로 **문법만** 확인했다(문 77개, plpgsql 함수 17개 파싱 통과). **실제 Supabase에서 실행해 본 적은 없다.**
-- RLS 테스트 26개는 작성했지만, **테스트 프로젝트가 연결되기 전까지 실행하지 못했다**(설정이 없으면 건너뛴다).
+- `0001`·`0002`는 테스트 프로젝트에서 실행해 RLS 테스트로 확인했다. `0003`은 문법만 확인했다(적용 뒤 확인).
+- RLS·왕복·스냅샷 테스트는 `npm run test:rls`(테스트 프로젝트 필요, 없으면 건너뜀)로 돌린다. 마지막 전체 통과는 0002까지(29개) 확인했고, 0003의 스냅샷 테스트는 0003 적용 뒤에 확인한다.
 - 자동 검증이 없는 것: 초대 코드 **만료**(클라이언트가 시간을 되돌릴 수 없음), Realtime의 RLS 적용, `delete_my_account`가 실제 Supabase 환경에서 `auth.users`를 지울 수 있는지(테스트에는 포함, 실행 전까지 미확인).
 
 ## 5. RLS 테스트가 확인하는 것

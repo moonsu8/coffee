@@ -8,6 +8,8 @@ import { HomeScreen } from '@/screens/home'
 import { SettingsScreen } from '@/screens/settings'
 import { StatsScreen } from '@/screens/stats'
 import { applyTheme } from '@/lib/theme'
+import { SharedBanner } from '@/components/shared-banner'
+import { RemoteProvider } from '@/remote/provider'
 import { StoreProvider, useStore } from '@/store/store'
 import { cn } from '@/lib/utils'
 
@@ -50,12 +52,14 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
+      <RemoteProvider>
       <StoreProvider>
         <ThemeSync />
         {/* 모바일은 전체 화면, 데스크탑은 가운데 정렬된 카드형 프레임 */}
         <div className="md:flex md:h-full md:items-center md:justify-center">
           <div className="relative mx-auto flex h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-bg md:h-[min(880px,calc(100dvh-48px))] md:rounded-[36px] md:border md:border-line md:shadow-pop">
             <ToastProvider>
+              <SharedBanner />
               <main ref={scroller} className="scroll-clean flex-1 overflow-x-hidden overflow-y-auto">
                 <AnimatePresence mode="wait" custom={dir} initial={false}>
                   <motion.div
@@ -118,6 +122,7 @@ export default function App() {
           </div>
         </div>
       </StoreProvider>
+      </RemoteProvider>
     </MotionConfig>
   )
 }

@@ -357,7 +357,7 @@ begin
   return gid;
 end $$;
 
--- 초대: 8자리, 헷갈리는 글자(0/O, 1/I/L) 제외한 32글자 집합
+-- 초대: 8자리, 헷갈리는 글자(0/O, 1/I) 제외한 32글자 집합 (코드는 대문자로만 보여준다)
 create function public.gen_invite_code() returns text
 language plpgsql volatile security definer set search_path = public, extensions as $$
 declare

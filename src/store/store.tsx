@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, OrderItem, Purchase, Schedule, Settings, GroupConfig } from '../types'
 import { EMPTY_DATA, parseAppData, type Recovery } from '../lib/data'
 import { LOCAL_ACCESS, localRepository, type Access, type AppRepository } from '../lib/repository'
+import { useRemote, type SharedGroup } from '../remote/provider'
 import { formatSavedAt } from '../lib/format'
 import { Button } from '../components/ui/button'
 import { Sheet } from '../components/ui/sheet'
@@ -33,7 +34,12 @@ interface Store {
   data: GroupView
   /** 저장되는 전체 데이터 (내보내기용) */
   root: AppData
+  /** 이 기기에 저장된(편집 가능한) 그룹들 */
   groups: Group[]
+  /** 서버에서 읽어 온 공유 그룹들 (읽기 전용) */
+  shared: SharedGroup[]
+  /** 전환기에 보여줄 모든 그룹 (내 기기 그룹 + 공유 그룹) */
+  switchable: Group[]
   /** 현재 그룹 템플릿의 용어 (커피는 지금 문구 그대로) */
   terms: Terms
   switchGroup: (id: string) => void
@@ -102,7 +108,12 @@ export function StoreProvider({ children, repository = localRepository }: { chil
   const [today, setToday] = useState(todayStr())
   const rootRef = useRef(root)
   rootRef.current = root
-  const group = root.groups.find((g) => g.id === activeId) ?? root.groups[0]
+  const remote = useRemote()
+  const shared = remote.groups
+  const switchable = useMemo(() => [...root.groups, ...shared.map((s) => s.group)], [root.groups, shared])
+  const group = switchable.find((g) => g.id === activeId) ?? root.groups[0]
+  // 서버 그룹은 이 앱에서 읽기만 한다 (쓰기는 그룹장 기능으로 따로 만든다)
+  const sharedInfo = shared.find((s) => s.group.id === group.id)
   const data = useMemo(() => groupToView(group), [group])
 
   useEffect(() => {
@@ -133,7 +144,11 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     // 모든 변경은 '만들어질 때의 그룹'에 묶인다: 되돌리기(undo)가 그룹을 바꾼 뒤에 눌려도 엉뚱한 그룹을 건드리지 않는다.
     // 그리고 updatedAt을 갱신한다.
     const gid = group.id
-    const set = (fn: (v: GroupView) => GroupView) => setRoot((r) => updateGroupView(r, gid, fn))
+    const readOnly = !!sharedInfo
+    // 읽기 전용 그룹은 어떤 변경 함수를 불러도 데이터가 바뀌지 않는다 (화면에서 버튼을 숨기는 것과 별개의 안전장치)
+    const set = (fn: (v: GroupView) => GroupView) => {
+      if (!readOnly) setRoot((r) => updateGroupView(r, gid, fn))
+    }
     const cur = () => groupToView(rootRef.current.groups.find((g) => g.id === gid) ?? group)
     const putPurchase = (p: Purchase | undefined, date: DateStr) =>
       set((d) => {
@@ -148,14 +163,16 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     const dayOf = (date: DateStr) => cur().orders.find((o) => o.date === date)
 
     return {
-      access: LOCAL_ACCESS,
+      access: sharedInfo ? { kind: 'remote', canWrite: false, lastSyncedAt: sharedInfo.fetchedAt } : LOCAL_ACCESS,
       data,
       root,
       today,
       groups: root.groups,
+      shared,
+      switchable,
       terms: termsOf(group.config),
       switchGroup: (id) => {
-        if (!rootRef.current.groups.some((g) => g.id === id)) return
+        if (!switchable.some((g) => g.id === id)) return
         setActiveId(id)
         repository.writeActiveGroup(id)
       },
@@ -187,6 +204,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         return () => setRoot((r) => withGroupRestored(r, res.removed, res.index))
       },
       addAbsenceAll: (memberId, from, to) => {
+        if (readOnly) return { applied: 0, noMatch: 0, ambiguous: 0, undo: () => {} }
         const plan = planAbsenceAll(rootRef.current, gid, memberId, from, to, uid)
         const ids = new Set(plan.items.map((i) => i.absence.id))
         setRoot((r) => withAbsencesAdded(r, plan.items))
@@ -320,7 +338,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         setRoot(await repository.loadInitial())
       },
     }
-  }, [root, today, group, data, repository])
+  }, [root, today, group, data, repository, shared, switchable, sharedInfo])
 
   if (!ready) return null
   if (blocked) {

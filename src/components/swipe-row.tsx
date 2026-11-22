@@ -9,10 +9,12 @@ interface Props {
   onEdit: () => void
   onDelete: () => void
   label: string
+  /** 읽기 전용: 밀어서 수정·삭제하는 동작 없이 내용만 보여준다 */
+  disabled?: boolean
 }
 
 /** 왼쪽으로 밀면 수정/삭제 노출. 탭하면 수정 */
-export function SwipeRow({ children, onEdit, onDelete, label }: Props) {
+export function SwipeRow({ children, onEdit, onDelete, label, disabled }: Props) {
   const x = useMotionValue(0)
   const [open, setOpen] = useState(false)
   const dragged = useRef(false)
@@ -21,6 +23,8 @@ export function SwipeRow({ children, onEdit, onDelete, label }: Props) {
     setOpen(to !== 0)
     animate(x, to, { type: 'spring', damping: 32, stiffness: 420 })
   }
+
+  if (disabled) return <div className="relative overflow-hidden rounded-[20px]">{children}</div>
 
   return (
     <div className="relative overflow-hidden rounded-[20px]">

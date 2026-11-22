@@ -12,7 +12,8 @@ import { useStore } from '@/store/store'
 import type { Absence, DateStr } from '@/types'
 
 export function AbsencesScreen() {
-  const { data, groups, today, memberById, addAbsence, addAbsenceAll, removeAbsence, addSkipDay, removeSkipDay } = useStore()
+  const { data, groups, today, memberById, addAbsence, addAbsenceAll, removeAbsence, addSkipDay, removeSkipDay, access } = useStore()
+  const canWrite = access.canWrite
   const [everywhere, setEverywhere] = useState(false)
   const toast = useToast()
   const [memberId, setMemberId] = useState<string | null>(null)
@@ -71,6 +72,7 @@ export function AbsencesScreen() {
     <div className="pb-8">
       <PageHeader title="휴가" subtitle="VACATION" />
       <div className="space-y-5 px-5">
+        {canWrite && (
         <Card>
           <SectionTitle>휴가 등록</SectionTitle>
           <p className="mb-2 text-sm font-semibold text-ink-2">누가 쉬나요?</p>
@@ -119,6 +121,7 @@ export function AbsencesScreen() {
             휴가 등록하기
           </Button>
         </Card>
+        )}
 
         <section>
           <SectionTitle>다가오는 휴가</SectionTitle>
@@ -157,6 +160,7 @@ export function AbsencesScreen() {
                       <span className="rounded-full bg-mint/35 px-2.5 py-1 text-xs font-bold text-mint-ink">
                         {ongoing ? '휴가 중' : `D-${dday}`}
                       </span>
+                      {canWrite && (
                       <button
                         aria-label={`${m?.name} 휴가 삭제`}
                         onClick={() => del(a)}
@@ -164,6 +168,7 @@ export function AbsencesScreen() {
                       >
                         <Trash2 size={19} />
                       </button>
+                      )}
                     </div>
                   </li>
                 )
@@ -193,9 +198,11 @@ export function AbsencesScreen() {
                           {a.to !== a.from && ` ~ ${formatMD(a.to)}`}
                         </span>
                       </span>
+                      {canWrite && (
                       <button aria-label="휴가 삭제" onClick={() => del(a)} className="grid size-11 place-items-center rounded-full text-ink-2 hover:text-danger">
                         <Trash2 size={18} />
                       </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -207,6 +214,7 @@ export function AbsencesScreen() {
         <Card>
           <SectionTitle>쉬는 날 (공휴일·회식 등)</SectionTitle>
           <p className="mb-3 text-sm text-ink-2">여기에 넣은 날은 당번 계산에서 빠져요. {data.schedule === 'weekdays' ? '주말은' : '담당 요일이 아닌 날은'} 자동으로 제외돼요.</p>
+          {canWrite && (
           <div className="flex gap-2">
             <input
               type="date"
@@ -226,14 +234,19 @@ export function AbsencesScreen() {
               추가
             </Button>
           </div>
+          )}
           {data.skipDays.length > 0 && (
             <ul className="mt-3 flex flex-wrap gap-2">
               {data.skipDays.map((d) => (
                 <li key={d} className="flex items-center rounded-full bg-mint/30 pl-3.5 text-sm font-semibold text-mint-ink">
                   {formatShort(d)}
+                  {canWrite ? (
                   <button aria-label={`${formatShort(d)} 쉬는 날 삭제`} onClick={() => removeSkipDay(d)} className="grid size-11 place-items-center rounded-full">
                     <X size={16} />
                   </button>
+                  ) : (
+                    <span className="pr-3.5" />
+                  )}
                 </li>
               ))}
             </ul>

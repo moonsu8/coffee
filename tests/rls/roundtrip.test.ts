@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { assertNotProduction, configured, mustRpc, newUser, type TestUser } from './helpers'
-import { groupToImport, remapMemberIds, rowsToGroup, type GroupRows } from '../../src/logic/remote-map'
+import { assertNotProduction, configured, mustRpc, newUser, readRows, type TestUser } from './helpers'
+import { groupToImport, remapMemberIds, rowsToGroup } from '../../src/logic/remote-map'
 import { richCoffeeGroup, richGeneralGroup } from '../../src/lib/testing'
 import type { Group } from '../../src/types'
 
@@ -15,24 +15,6 @@ function uuidSeq() {
   const base = crypto.randomUUID().slice(0, 24)
   let n = 0
   return () => `${base}${(++n).toString(16).padStart(12, '0')}`
-}
-
-async function readRows(user: TestUser, gid: string): Promise<GroupRows> {
-  const c = user.client
-  const one = async <T>(q: PromiseLike<{ data: T | null; error: { message: string } | null }>) => {
-    const { data, error } = await q
-    if (error) throw new Error(error.message)
-    return data as T
-  }
-  return {
-    group: await one(c.from('groups').select('id,name,emoji,schedule,config').eq('id', gid).single()),
-    members: await one(c.from('members').select('*').eq('group_id', gid)),
-    records: await one(c.from('records').select('*').eq('group_id', gid)),
-    absences: await one(c.from('absences').select('*').eq('group_id', gid)),
-    skip_days: await one(c.from('skip_days').select('*').eq('group_id', gid)),
-    orders: await one(c.from('orders').select('*').eq('group_id', gid)),
-    prices: await one(c.from('prices').select('*').eq('group_id', gid).maybeSingle()),
-  }
 }
 
 /** 서버가 새로 만드는 휴가 id는 비교에서 뺀다 */

@@ -106,7 +106,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 246개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `themes`(대비·커피 불변), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 테스트 292개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `themes`(대비·커피 불변), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
 - 시트 터치 스크롤은 설치된 Chrome에 실제 터치 이벤트(`touchStart/Move/End`)를 보내는 방식(360x800·다크·`playwright-core`를 `--no-save`로 임시 설치)으로 확인했다: 수정 전 스와이프 0px·저장 버튼 화면 밖 → 수정 후 스크롤·저장 버튼 고정 노출. `synthesizeScrollGesture`는 이 환경에서 스크롤을 일으키지 못하므로 쓰지 말고, 항상 홈 화면 같은 대조군으로 도구가 동작하는지 먼저 확인한다.
 - 커피 화면 불변 확인: 테마 도입 전후로 홈·기록·휴가·통계·설정·기록 추가 시트를 라이트·다크(375x800, 날짜 고정, reduced-motion)로 캡처해 PIL로 비교 → 12장 모두 픽셀 차이 0. 새 테마의 실제 렌더링은 `/design`과 그룹 전환(Chrome 에뮬레이션)으로 확인했고 실제 기기에서는 확인하지 못했다.
 - **미확인**: 그룹 전환기·그룹 관리 카드·휴가 "모든 그룹에 적용"·주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
@@ -130,3 +130,12 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - **비밀값(서비스 키, 서명 키, 토큰)은 저장소·번들·내보내기 JSON에 넣지 않는다.** Supabase는 anon key만 클라이언트에, service_role key는 서버 함수에서만.
 - 개인정보(A안): 주민번호 등 고유식별정보·카드/계좌·민감정보는 수집·저장 금지. 결제는 Google Play/PG가 처리하고 서버엔 구독 상태만. 이름(별명)·기록·휴가·금액·주문은 서버에 평문 저장하되 RLS로 그룹 소속자만 접근. 멤버 입력칸에 "실명 대신 별명도 괜찮아요", 메모칸에 "주민번호·카드번호 등은 적지 마세요" 안내. 탈퇴·그룹 삭제 시 서버 데이터 즉시 삭제, 만 14세 미만 가입 제한. 저장 계층을 분리해 나중에 종단간 암호화(B안)로 바꿀 수 있게 설계.
 - 매년 target API 상향 절차는 4단계에서 이 파일에 기록한다.
+
+## 서버 공유(Supabase) 구현 메모와 운영 규칙
+- **운영 환경 변수 규칙(CAPTCHA 전까지)**: 운영 Supabase 프로젝트의 `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`는 **익명 로그인 CAPTCHA(1-F)를 넣기 전까지 GitHub Secrets·Variables나 배포 설정에 넣지 않는다.** 빌드에 이 값이 없으면 공유 UI는 숨겨지고 `supabase-js`도 로드되지 않는다(배포본은 로컬 전용 앱 그대로). 로컬 개발의 `.env.local`은 **테스트 프로젝트** 값만 쓴다.
+- 환경 변수 이름: 앱(공개 값) `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`, RLS 테스트·시드 `SUPABASE_TEST_URL`/`SUPABASE_TEST_ANON_KEY`(`.env.test.local`). 서로 섞지 않는다. `service_role` 키·DB 비밀번호·Google Client secret은 어디에도 두지 않는다(대시보드에만).
+- 서버 그룹은 **로컬 `AppData`(v4)에 넣지 않는다.** 스토어는 로컬 그룹(`groups`, 편집 가능)과 서버 그룹(`shared`, 읽기 전용)을 따로 들고 `switchable`로 합쳐 보여준다. 서버 그룹을 보는 동안 `access = { kind: 'remote', canWrite: false }`이고 `set()`이 변경을 막는다(그리고 `updateGroupView`는 로컬에 없는 id를 건드리지 않는다). 화면은 `access.canWrite`로 쓰기 버튼을 숨긴다.
+- 코드 위치: `logic/remote-map.ts`(행↔Group, diff, import payload, payload 코덱=B안 전환 지점), `lib/repository.ts`(로컬 저장 계층), `remote/`(`api.ts` supabase-js 동적 로드·모든 통신, `provider.tsx` 상태·갱신·오프라인, `cache.ts` 별도 키 `coffee-duty:remote-cache`, `snapshot.ts` 서버 응답 검증, `invite.ts`, `format.ts`), `components/shared-card.tsx`(설정 카드), `components/shared-banner.tsx`(보기 전용 안내).
+- 서버 그룹 읽기는 RPC `get_group_snapshot` 한 번(일관된 스냅샷). 갱신은 앱 열 때·화면 복귀 시(30초 간격)·온라인 복귀 시·수동 새로고침. 실시간은 1-E.
+- 로그인 세션은 supabase-js가 `coffee-duty:auth` 키에 저장한다. 세션도 캐시도 없으면 서버에 연결하지 않는다. 익명 세션은 도메인이 바뀌면 사라진다(도메인 확정 전에는 실제 그룹원을 `github.io`로 초대하지 않는다).
+- DB 마이그레이션은 `supabase/migrations/`에 번호 순서로 쌓고 이미 적용한 파일은 고치지 않는다(새 번호로 추가). 적용 순서와 방법: `docs/SUPABASE.md`. Google 로그인 설정: `docs/GOOGLE_OAUTH.md`.

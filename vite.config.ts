@@ -32,8 +32,15 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,json,woff2}'],
+        // 서버 공유(supabase-js) 묶음은 미리 받지 않는다: 공유를 쓰지 않는 사용자는 받지 않고, 쓰기 시작하면 아래 런타임 캐시에 저장된다
+        globIgnores: ['**/assets/supabase-*.js'],
         // Pretendard(CDN)도 오프라인에서 쓰이도록 캐시
         runtimeCaching: [
+          {
+            urlPattern: /\/assets\/supabase-[^/]+\.js$/i,
+            handler: 'CacheFirst',
+            options: { cacheName: 'supabase-chunk', expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
           {
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,
             handler: 'CacheFirst',
@@ -43,5 +50,13 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // supabase-js를 이름 있는 별도 묶음으로 분리 (공유 기능을 쓸 때만 불러온다)
+        manualChunks: (id: string) => (id.includes('node_modules/@supabase') ? 'supabase' : undefined),
+      },
+    },
+  },
   test: { include: ['src/**/*.test.ts'] },
 })
