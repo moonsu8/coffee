@@ -8,6 +8,7 @@ import { THEME_LABELS } from '@/logic/themes'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/store'
 import { useRemote } from '@/remote/provider'
+import { PrivacyHint } from './privacy-hint'
 import { ShareSheet } from './share-sheet'
 import { THEME_IDS, type Group, type Schedule, type ThemeId } from '@/types'
 import { Card, SectionTitle } from './common'
@@ -345,6 +346,7 @@ function GroupFields({
             placeholder="이름을 쉼표나 줄바꿈으로 구분해요. 나중에 설정에서도 추가할 수 있어요"
             className="w-full resize-none rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base placeholder:text-[14px] placeholder:text-ink-2/70"
           />
+          <PrivacyHint kind="name" />
         </div>
       )}
       <ScheduleField value={schedule} onChange={setSchedule} />

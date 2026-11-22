@@ -106,7 +106,7 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - 이 저장소는 `main`에 push하면 바로 배포되고 실제 기록이 있는 기기가 있다. 데이터 구조를 바꾸는 변경은 로컬에서 화면과 `check:migration`을 확인한 뒤에만 push한다.
 
 ## 상태
-- 테스트 292개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `themes`(대비·커피 불변), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
+- 테스트 320개 통과(`nextBuyer`, `order`, `fairness`, `pricing-form`, `groups`, `schedule`(요일·프리셋·v3→v4), `themes`(대비·커피 불변), `migrate`, `pricing-migrate`, `shadow`, `install`, `metrics`), `tsc` 및 `vite build` 통과.
 - 시트 터치 스크롤은 설치된 Chrome에 실제 터치 이벤트(`touchStart/Move/End`)를 보내는 방식(360x800·다크·`playwright-core`를 `--no-save`로 임시 설치)으로 확인했다: 수정 전 스와이프 0px·저장 버튼 화면 밖 → 수정 후 스크롤·저장 버튼 고정 노출. `synthesizeScrollGesture`는 이 환경에서 스크롤을 일으키지 못하므로 쓰지 말고, 항상 홈 화면 같은 대조군으로 도구가 동작하는지 먼저 확인한다.
 - 커피 화면 불변 확인: 테마 도입 전후로 홈·기록·휴가·통계·설정·기록 추가 시트를 라이트·다크(375x800, 날짜 고정, reduced-motion)로 캡처해 PIL로 비교 → 12장 모두 픽셀 차이 0. 새 테마의 실제 렌더링은 `/design`과 그룹 전환(Chrome 에뮬레이션)으로 확인했고 실제 기기에서는 확인하지 못했다.
 - **미확인**: 그룹 전환기·그룹 관리 카드·휴가 "모든 그룹에 적용"·주문 카드·금액 시트·커피 수지 카드·설정 화면의 실제 렌더링, 스와이프/드래그 제스처, 모바일 375px 레이아웃은 눈으로 확인하지 못했다(Playwright 미연결). 실제 총무 폰 데이터로 `check:migration`도 아직 돌리지 않았다.
@@ -143,3 +143,6 @@ Vite + React 19 + TypeScript, Tailwind v4, shadcn 스타일 컴포넌트(Radix D
 - **서버 쓰기(그룹장)**: 서버 그룹은 변경 전/후 `diffGroups`를 `apply_group_ops`(0004, 한 트랜잭션, `rev` 충돌 감지)로 보낸다. `remote/writer.ts`가 그룹별 순서 대기열(성공마다 rev 이어가기, 충돌·오류 시 뒤 변경 폐기 → 최신 내용 다시 읽기), `remote/provider.tsx`의 `commitGroup`이 낙관적 반영. 오프라인이면 쓰기를 막는다(`access.canWrite = 그룹장 && online`, 큐는 나중). 서버 그룹의 새 멤버·휴가 id는 `crypto.randomUUID()`(`makeId`).
 - **내 기기 그룹 → 서버로 옮기기(`remote/share.ts`)**: 백업(`coffee-duty:backup-before-share-<그룹id>`, 처음 한 번만) → 연결 정보(`coffee-duty:share-links`: importKey·멤버 id 매핑, 올리기 전에 먼저 저장) → `import_group`(같은 key면 같은 그룹, 재시도 안전) → 서버에서 다시 읽어 `diffContent`로 대조(`verified`). 다르면 경고하고 이 기기 사본 삭제를 권하지 않는다. 연결 정보는 AppData와 분리된 기기 키(내보내기·shadow에 안 섞임)이고 로그아웃해도 유지한다.
 - **사본 상태(`remote/links.ts` `copyStatus`)**: 서버 그룹이 보이면 내 기기 사본은 전환기에서 숨김(`moved`), 안 보이면(로그아웃 등) "서버로 옮긴 그룹의 이전 사본"(`stale`)으로 보이고 **기본은 수정 불가**, 배너의 [수정하기] → 경고 확인 후 이번 실행 동안만 수정 가능(`access.staleCopy`, `unlockCopy`). 이 사본의 수정은 서버로 가지 않는다.
+- **초대 코드 만들기(그룹장, `components/invite-sheet.tsx`)**: 서버 그룹의 그룹장 행에 [초대] → 유효 기간(1일/**7일 기본**/30일) · 인원(**기본 = 그룹 멤버 수**, 1~200) → RPC `create_invite`(승인 옵션은 1-F, 지금은 바로 참여). 목록은 `invites`를 그룹장만 읽을 수 있는 RLS로 조회, 복사(코드/안내문, 안내문에 앱 주소 포함), 코드 취소(`revoke_invite`, 한 번 더 눌러야 취소 — 이미 참여한 사람은 그대로 볼 수 있다). 기본값·상태·안내문 로직은 `remote/invite.ts`(순수 함수, 테스트). 새 SQL 없음.
+- **개인정보 안내 문구(`components/privacy-hint.tsx`)**: 멤버 이름 입력칸·그룹 만들기의 멤버 칸에 "실명 대신 별명도 괜찮아요.", 기록/주문 메모 칸에 "주민번호·카드번호 등은 적지 마세요." — **서버 연결 환경 변수가 있는 빌드에서만** 보인다(없으면 화면이 그대로).
+- 직접 확인 순서(Google 로그인·창 두 개): `docs/MANUAL_CHECK.md`.

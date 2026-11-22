@@ -1,4 +1,4 @@
-import { LogIn, RefreshCw, Users } from 'lucide-react'
+import { LogIn, RefreshCw, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { Card, SectionTitle } from '@/components/common'
 import { useToast } from '@/components/toast'
@@ -7,6 +7,7 @@ import { Sheet, SheetFooter } from '@/components/ui/sheet'
 import { checkInviteCode, codeMessage, normalizeInviteCode } from '@/remote/invite'
 import { formatSyncTime } from '@/remote/format'
 import { useRemote, type SharedGroup } from '@/remote/provider'
+import { InviteSheet } from './invite-sheet'
 
 /**
  * 설정의 "공유 그룹" 카드. 서버 연결이 설정된 빌드에서만 보인다(환경 변수가 없으면 아무것도 그리지 않는다).
@@ -19,6 +20,7 @@ export function SharedCard() {
   const [googleOpen, setGoogleOpen] = useState(false)
   const [outOpen, setOutOpen] = useState(false)
   const [leaving, setLeaving] = useState<SharedGroup | null>(null)
+  const [inviting, setInviting] = useState<SharedGroup | null>(null)
 
   if (!remote.enabled) return null
   const { user, groups } = remote
@@ -63,6 +65,11 @@ export function SharedCard() {
                   {s.role === 'owner' ? '그룹장' : '보기 전용'} · 업데이트 {formatSyncTime(s.fetchedAt)}
                 </p>
               </div>
+              {s.role === 'owner' && (
+                <Button size="sm" variant="soft" onClick={() => setInviting(s)} aria-label={`${s.group.name} 초대 코드 관리`}>
+                  <UserPlus size={16} /> 초대
+                </Button>
+              )}
               {s.role === 'viewer' && (
                 <Button size="sm" variant="ghost" onClick={() => setLeaving(s)}>
                   나가기
@@ -91,6 +98,7 @@ export function SharedCard() {
         )}
       </div>
 
+      <InviteSheet shared={inviting} onClose={() => setInviting(null)} />
       <JoinSheet open={joinOpen} onClose={() => setJoinOpen(false)} />
       <GoogleSheet open={googleOpen} onClose={() => setGoogleOpen(false)} />
 

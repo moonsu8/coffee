@@ -1,3 +1,4 @@
+import { PrivacyHint } from '@/components/privacy-hint'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CalendarDays, List, Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -265,6 +266,7 @@ function EditorBody({
           placeholder={data.config.memoPlaceholder}
           className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
         />
+        <PrivacyHint kind="memo" />
       </div>
       {data.template === 'coffee' && (
         <div>

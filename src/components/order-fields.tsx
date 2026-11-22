@@ -1,3 +1,4 @@
+import { PrivacyHint } from '@/components/privacy-hint'
 import { allMenus, findPreset, NO_DRINK } from '@/logic/menu'
 import { cn } from '@/lib/utils'
 import type { Order, Size, Temp } from '@/types'
@@ -128,6 +129,7 @@ export function OrderFields({ value, onChange, customMenus, allowNone, idPrefix 
               placeholder="예) 덜 달게"
               className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base placeholder:text-ink-2/70"
             />
+            <PrivacyHint kind="memo" />
           </div>
         </>
       )}

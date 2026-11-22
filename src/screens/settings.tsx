@@ -1,3 +1,4 @@
+import { PrivacyHint } from '@/components/privacy-hint'
 import { Reorder, useDragControls } from 'framer-motion'
 import { Download, GripVertical, History, Plus, RotateCcw, Smartphone, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -326,6 +327,7 @@ function EditorBody({ editing, onClose }: { editing: NonNullable<Editing>; onClo
             placeholder="예) 김철수"
             className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 px-4 text-base font-semibold placeholder:font-normal placeholder:text-ink-2/70"
           />
+          <PrivacyHint kind="name" />
         </div>
       </div>
       <div>

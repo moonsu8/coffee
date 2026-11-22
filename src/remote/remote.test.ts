@@ -7,7 +7,19 @@ import { groupToRows, rowsToGroup } from '../logic/remote-map'
 import { SCHEMA_VERSION, type AppData } from '../types'
 import { CACHE_KEY, clearCache, readCache, writeCache, type CacheMap } from './cache'
 import { formatSyncTime } from './format'
-import { checkInviteCode, CODE_ALPHABET, joinErrorMessage, normalizeInviteCode } from './invite'
+import {
+  checkInviteCode,
+  clampMaxUses,
+  CODE_ALPHABET,
+  defaultInviteOptions,
+  formatExpiry,
+  INVITE_TTL_OPTIONS,
+  inviteShareText,
+  inviteStatus,
+  joinErrorMessage,
+  normalizeInviteCode,
+  type InviteRow,
+} from './invite'
 import { parseSnapshot, SnapshotError } from './snapshot'
 
 class MemoryStorage implements StorageLike {
@@ -169,5 +181,50 @@ describe('마지막 업데이트 시각', () => {
     expect(formatSyncTime(new Date(2026, 10, 18, 0, 7).getTime(), now)).toBe('오전 12:07')
     expect(formatSyncTime(new Date(2026, 10, 17, 21, 30).getTime(), now)).toBe('어제 오후 9:30')
     expect(formatSyncTime(new Date(2026, 10, 3, 13, 0).getTime(), now)).toBe('11/3 오후 1:00')
+  })
+})
+
+describe('초대 코드 만들기 기본값과 상태', () => {
+  it('기본값: 유효 7일, 인원은 그룹 멤버 수 (최소 1, 서버 상한 200)', () => {
+    expect(defaultInviteOptions(6)).toEqual({ ttlHours: 168, maxUses: 6 })
+    expect(defaultInviteOptions(0)).toEqual({ ttlHours: 168, maxUses: 1 })
+    expect(defaultInviteOptions(1000).maxUses).toBe(200)
+    expect(clampMaxUses(0)).toBe(1)
+    expect(clampMaxUses(250)).toBe(200)
+    expect(clampMaxUses(7.9)).toBe(7)
+    expect(clampMaxUses(Number.NaN)).toBe(1)
+  })
+  it('유효 기간 선택지는 서버 허용 범위(1시간~30일) 안이고 7일이 들어 있다', () => {
+    expect(INVITE_TTL_OPTIONS.map((o) => o.hours)).toEqual([24, 168, 720])
+    expect(INVITE_TTL_OPTIONS.every((o) => o.hours >= 1 && o.hours <= 24 * 30)).toBe(true)
+  })
+  const inv = (over: Partial<InviteRow> = {}): InviteRow => ({
+    code: 'K7M2QX4P',
+    expires_at: '2026-11-29T10:00:00Z',
+    max_uses: 3,
+    uses: 1,
+    requires_approval: false,
+    revoked_at: null,
+    created_at: '2026-11-22T10:00:00Z',
+    ...over,
+  })
+  it('코드 상태: 사용 가능 / 만료 / 인원 참 / 취소', () => {
+    const now = new Date('2026-11-25T00:00:00Z').getTime()
+    expect(inviteStatus(inv(), now)).toBe('active')
+    expect(inviteStatus(inv({ expires_at: '2026-11-24T00:00:00Z' }), now)).toBe('expired')
+    expect(inviteStatus(inv({ uses: 3 }), now)).toBe('full')
+    expect(inviteStatus(inv({ revoked_at: '2026-11-23T00:00:00Z' }), now)).toBe('revoked')
+    expect(inviteStatus(inv({ revoked_at: '2026-11-23T00:00:00Z', uses: 3 }), now)).toBe('revoked')
+  })
+  it('만료 표시와 단톡방 안내 문구', () => {
+    expect(formatExpiry(new Date(2026, 10, 29, 12).toISOString())).toBe('11/29(일)까지')
+    const text = inviteShareText({ emoji: '☕', name: '커피', code: 'K7M2QX4P', expiresAt: new Date(2026, 10, 29, 12).toISOString(), maxUses: 6, appUrl: 'https://example.test/app/' })
+    expect(text).toContain('☕ 커피 그룹에 초대해요')
+    expect(text).toContain('K7M2QX4P')
+    expect(text).toContain('11/29(일)까지')
+    expect(text).toContain('최대 6명')
+    expect(text).toContain('https://example.test/app/')
+    expect(text).toContain('보기만')
+    expect(text.split('\n')).toHaveLength(4)
   })
 })

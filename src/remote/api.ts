@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GroupRows, ImportPayload, RemoteOp } from '../logic/remote-map'
 import type { Role } from './cache'
+import type { InviteRow } from './invite'
 import { parseSnapshotFull } from './snapshot'
 
 /**
@@ -100,6 +101,36 @@ export async function applyGroupOps(c: SupabaseClient, groupId: string, baseRev:
   const { data, error } = await c.rpc('apply_group_ops', { p_group: groupId, p_base_rev: baseRev, p_ops: ops })
   if (error) throw new Error(error.message)
   return data as Applied
+}
+
+/** 그룹장: 이 그룹의 초대 코드 목록(최근 것부터). 그룹원은 읽을 수 없다(RLS) */
+export async function listInvites(c: SupabaseClient, groupId: string): Promise<InviteRow[]> {
+  const { data, error } = await c
+    .from('invites')
+    .select('code, expires_at, max_uses, uses, requires_approval, revoked_at, created_at')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as InviteRow[]
+}
+
+/** 그룹장: 그룹원(viewer) 수. 그룹장은 자기 그룹의 소속 목록을 읽을 수 있다 */
+export async function countViewers(c: SupabaseClient, groupId: string): Promise<number> {
+  const { count, error } = await c.from('group_members').select('user_id', { count: 'exact', head: true }).eq('group_id', groupId).eq('role', 'viewer')
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+export async function createInviteRpc(c: SupabaseClient, groupId: string, o: { ttlHours: number; maxUses: number }): Promise<string> {
+  const { data, error } = await c.rpc('create_invite', { p_group: groupId, p_ttl_hours: o.ttlHours, p_max_uses: o.maxUses, p_requires_approval: false })
+  if (error || typeof data !== 'string') throw new Error(error?.message ?? 'invite_failed')
+  return data
+}
+
+export async function revokeInviteRpc(c: SupabaseClient, code: string): Promise<void> {
+  const { error } = await c.rpc('revoke_invite', { p_code: code })
+  if (error) throw new Error(error.message)
 }
 
 export async function leaveGroup(c: SupabaseClient, groupId: string): Promise<void> {
