@@ -9,22 +9,22 @@
 --  * groups의 name, emoji, schedule, config 변경
 --  * group_members의 role 변경(그룹장 넘기기). 참여/나가기/내보내기는 올리지 않는다
 --    (그룹원이 들어왔다고 그룹장의 쓰기가 충돌하면 안 된다)
--- 0004 적용 뒤에 SQL Editor에서 그대로 Run (새 쿼리 창).
+-- 0004 적용 뒤에 SQL Editor에서 그대로 Run (새 쿼리 창). 여러 번 Run해도 안전하다(멱등: create or replace + drop trigger if exists).
 
 -- 이 트랜잭션에서 rev를 이미 올린 그룹 id를 기억한다 (트랜잭션 로컬 설정)
-create function public.rev_already_bumped(gid uuid) returns boolean
+create or replace function public.rev_already_bumped(gid uuid) returns boolean
 language sql stable set search_path = public as $$
   select position(gid::text in coalesce(current_setting('app.rev_bumped', true), '')) > 0
 $$;
 
-create function public.rev_mark_bumped(gid uuid) returns void
+create or replace function public.rev_mark_bumped(gid uuid) returns void
 language plpgsql set search_path = public as $$
 begin
   perform set_config('app.rev_bumped', coalesce(current_setting('app.rev_bumped', true), '') || ',' || gid::text, true);
 end $$;
 
 -- groups 한 행이 바뀔 때: rev가 이미 바뀌었으면 기록만, 내용이 바뀌었는데 rev가 그대로면 올린다
-create function public.groups_rev_guard() returns trigger
+create or replace function public.groups_rev_guard() returns trigger
 language plpgsql set search_path = public as $$
 begin
   if new.rev is distinct from old.rev then
@@ -38,11 +38,12 @@ begin
   return new;
 end $$;
 
+drop trigger if exists groups_rev_guard on public.groups;
 create trigger groups_rev_guard before update on public.groups for each row execute function public.groups_rev_guard();
 
 -- 자식 테이블: 문장(statement)마다 한 번, 바뀐 그룹들의 rev를 올린다
 -- (RLS와 무관하게 동작해야 하므로 security definer. 호출자에게 실행 권한을 주지 않는다)
-create function public.bump_rev_from_nt() returns trigger
+create or replace function public.bump_rev_from_nt() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare gid uuid;
 begin
@@ -59,6 +60,9 @@ do $$
 declare t text;
 begin
   foreach t in array array['members', 'records', 'absences', 'skip_days', 'orders', 'prices'] loop
+    execute format('drop trigger if exists %1$s_rev_ins on public.%1$I', t);
+    execute format('drop trigger if exists %1$s_rev_upd on public.%1$I', t);
+    execute format('drop trigger if exists %1$s_rev_del on public.%1$I', t);
     execute format('create trigger %1$s_rev_ins after insert on public.%1$I referencing new table as nt for each statement execute function public.bump_rev_from_nt()', t);
     execute format('create trigger %1$s_rev_upd after update on public.%1$I referencing new table as nt for each statement execute function public.bump_rev_from_nt()', t);
     execute format('create trigger %1$s_rev_del after delete on public.%1$I referencing old table as nt for each statement execute function public.bump_rev_from_nt()', t);
@@ -66,7 +70,7 @@ begin
 end $$;
 
 -- 그룹장 넘기기: role이 바뀌면 rev를 올린다 (옛·새 그룹장 화면이 새 역할을 다시 읽는다)
-create function public.bump_rev_on_role_change() returns trigger
+create or replace function public.bump_rev_on_role_change() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare gid uuid;
 begin
@@ -79,5 +83,6 @@ begin
 end $$;
 revoke all on function public.bump_rev_on_role_change() from public, anon, authenticated;
 
+drop trigger if exists group_members_rev_role on public.group_members;
 create trigger group_members_rev_role after update on public.group_members
   referencing new table as nt old table as ot for each statement execute function public.bump_rev_on_role_change();
