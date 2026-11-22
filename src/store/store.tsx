@@ -10,6 +10,8 @@ import { suggestStyle } from '../lib/members'
 import { uid } from '../lib/utils'
 import { today as todayStr } from '../logic/dates'
 import {
+  applyView,
+  editGroup,
   groupToView,
   newGroup,
   planAbsenceAll,
@@ -112,7 +114,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
   const shared = remote.groups
   const switchable = useMemo(() => [...root.groups, ...shared.map((s) => s.group)], [root.groups, shared])
   const group = switchable.find((g) => g.id === activeId) ?? root.groups[0]
-  // 서버 그룹은 이 앱에서 읽기만 한다 (쓰기는 그룹장 기능으로 따로 만든다)
+  // 서버 그룹: 그룹장이면 수정할 수 있고(서버에 저장), 그룹원이면 읽기만 한다
   const sharedInfo = shared.find((s) => s.group.id === group.id)
   const data = useMemo(() => groupToView(group), [group])
 
@@ -144,12 +146,15 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     // 모든 변경은 '만들어질 때의 그룹'에 묶인다: 되돌리기(undo)가 그룹을 바꾼 뒤에 눌려도 엉뚱한 그룹을 건드리지 않는다.
     // 그리고 updatedAt을 갱신한다.
     const gid = group.id
-    const readOnly = !!sharedInfo
-    // 읽기 전용 그룹은 어떤 변경 함수를 불러도 데이터가 바뀌지 않는다 (화면에서 버튼을 숨기는 것과 별개의 안전장치)
+    // 서버 그룹 id는 uuid여야 한다(서버 키 형식). 내 기기 그룹은 짧은 id를 그대로 쓴다
+    const makeId = () => (sharedInfo ? crypto.randomUUID() : uid())
+    // 그룹원(읽기 전용) 그룹은 어떤 변경 함수를 불러도 데이터가 바뀌지 않는다 (화면에서 버튼을 숨기는 것과 별개의 안전장치).
+    // 그룹장의 서버 그룹은 변경을 서버에 보낸다(낙관적으로 먼저 화면에 반영). 오프라인이면 반영하지 않고 안내한다.
     const set = (fn: (v: GroupView) => GroupView) => {
-      if (!readOnly) setRoot((r) => updateGroupView(r, gid, fn))
+      if (!sharedInfo) setRoot((r) => updateGroupView(r, gid, fn))
+      else if (sharedInfo.role === 'owner') remote.commitGroup(gid, (g) => applyView(g, fn(groupToView(g))))
     }
-    const cur = () => groupToView(rootRef.current.groups.find((g) => g.id === gid) ?? group)
+    const cur = () => groupToView(rootRef.current.groups.find((g) => g.id === gid) ?? remote.getGroup(gid) ?? group)
     const putPurchase = (p: Purchase | undefined, date: DateStr) =>
       set((d) => {
         const rest = d.purchases.filter((x) => x.date !== date)
@@ -163,7 +168,9 @@ export function StoreProvider({ children, repository = localRepository }: { chil
     const dayOf = (date: DateStr) => cur().orders.find((o) => o.date === date)
 
     return {
-      access: sharedInfo ? { kind: 'remote', canWrite: false, lastSyncedAt: sharedInfo.fetchedAt } : LOCAL_ACCESS,
+      access: sharedInfo
+        ? { kind: 'remote', role: sharedInfo.role, canWrite: sharedInfo.role === 'owner' && remote.online, lastSyncedAt: sharedInfo.fetchedAt }
+        : LOCAL_ACCESS,
       data,
       root,
       today,
@@ -191,7 +198,14 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         repository.writeActiveGroup(id)
         return id
       },
-      updateGroup: (id, patch) => setRoot((r) => withGroupEdited(r, id, patch)),
+      updateGroup: (id, patch) => {
+        const s = shared.find((x) => x.group.id === id)
+        if (s) {
+          if (s.role === 'owner') remote.commitGroup(id, (g) => editGroup(g, patch))
+          return
+        }
+        setRoot((r) => withGroupEdited(r, id, patch))
+      },
       removeGroup: (id) => {
         const res = withGroupRemoved(rootRef.current, id)
         if (!res) return null // 마지막 그룹은 삭제할 수 없다
@@ -204,7 +218,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         return () => setRoot((r) => withGroupRestored(r, res.removed, res.index))
       },
       addAbsenceAll: (memberId, from, to) => {
-        if (readOnly) return { applied: 0, noMatch: 0, ambiguous: 0, undo: () => {} }
+        if (sharedInfo) return { applied: 0, noMatch: 0, ambiguous: 0, undo: () => {} } // 서버 그룹은 이름이 같은 멤버로 연결하지 않는다
         const plan = planAbsenceAll(rootRef.current, gid, memberId, from, to, uid)
         const ids = new Set(plan.items.map((i) => i.absence.id))
         setRoot((r) => withAbsencesAdded(r, plan.items))
@@ -230,7 +244,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
 
       addAbsence: (memberId, from, to) => {
         const [f, t] = from <= to ? [from, to] : [to, from]
-        const a = { id: uid(), memberId, from: f, to: t }
+        const a = { id: makeId(), memberId, from: f, to: t }
         set((d) => ({ ...d, absences: [...d.absences, a] }))
         return () => set((d) => ({ ...d, absences: d.absences.filter((x) => x.id !== a.id) }))
       },
@@ -254,7 +268,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
             members: [
               ...d.members,
               {
-                id: uid(),
+                id: makeId(),
                 name: m.name.trim(),
                 order,
                 color: m.color ?? style.color,
@@ -338,7 +352,7 @@ export function StoreProvider({ children, repository = localRepository }: { chil
         setRoot(await repository.loadInitial())
       },
     }
-  }, [root, today, group, data, repository, shared, switchable, sharedInfo])
+  }, [root, today, group, data, repository, shared, switchable, sharedInfo, remote])
 
   if (!ready) return null
   if (blocked) {

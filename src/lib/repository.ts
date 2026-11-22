@@ -59,6 +59,8 @@ export const localRepository: AppRepository = createLocalRepository()
 /** 지금 보고 있는 그룹이 어디에 저장되고 누가 쓸 수 있는지. 로컬 그룹은 항상 쓸 수 있다 */
 export interface Access {
   kind: 'local' | 'remote'
+  /** 서버 그룹: 그룹장이고 인터넷이 연결돼 있을 때만 true */
+  role?: 'owner' | 'viewer'
   canWrite: boolean
   /** 서버 그룹의 마지막 동기화 시각(ms). 로컬은 null */
   lastSyncedAt: number | null

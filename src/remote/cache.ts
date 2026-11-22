@@ -12,7 +12,8 @@ const MAX_BYTES = 3_000_000 // 저장 공간 보호: 넘으면 가장 오래된 
 export type Role = 'owner' | 'viewer'
 export interface CachedGroup {
   role: Role
-  fetchedAt: number // 서버에서 마지막으로 성공적으로 읽은 시각(ms)
+  fetchedAt: number // 서버에서 마지막으로 성공적으로 읽은/저장한 시각(ms)
+  rev?: number // 서버의 변경 번호(그룹장이 쓸 때 기준값). 없으면 먼저 다시 읽어야 한다
   rows: GroupRows
 }
 export type CacheMap = Record<string, CachedGroup>

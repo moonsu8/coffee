@@ -103,7 +103,7 @@ export function AbsencesScreen() {
               <span className="text-ink-2">달력에서 시작일과 종료일을 눌러 주세요</span>
             )}
           </div>
-          {groups.length > 1 && (
+          {groups.length > 1 && access.kind === 'local' && (
             <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl bg-surface-2 px-4 py-2.5">
               <input
                 type="checkbox"

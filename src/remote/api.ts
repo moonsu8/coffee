@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GroupRows } from '../logic/remote-map'
+import type { GroupRows, RemoteOp } from '../logic/remote-map'
 import type { Role } from './cache'
-import { parseSnapshot } from './snapshot'
+import { parseSnapshotFull } from './snapshot'
 
 /**
  * Supabase와 통신하는 모든 코드. `supabase-js`는 여기서만, 그리고 필요할 때만 동적으로 불러온다
@@ -77,10 +77,22 @@ export async function listMemberships(c: SupabaseClient, userId: string): Promis
 }
 
 /** 그룹 전체를 한 번에(일관되게) 읽는다. 소속이 아니면 null */
-export async function fetchGroupRows(c: SupabaseClient, groupId: string): Promise<GroupRows | null> {
+export async function fetchGroupRows(c: SupabaseClient, groupId: string): Promise<{ rows: GroupRows; rev: number | null } | null> {
   const { data, error } = await c.rpc('get_group_snapshot', { p_group: groupId })
   if (error) throw new Error(error.message)
-  return data === null ? null : parseSnapshot(data)
+  return data === null ? null : parseSnapshotFull(data)
+}
+
+export interface Applied {
+  status: 'ok' | 'conflict'
+  rev: number
+}
+
+/** 그룹장의 변경을 한 트랜잭션으로 적용 (기준 rev가 다르면 conflict) */
+export async function applyGroupOps(c: SupabaseClient, groupId: string, baseRev: number, ops: RemoteOp[]): Promise<Applied> {
+  const { data, error } = await c.rpc('apply_group_ops', { p_group: groupId, p_base_rev: baseRev, p_ops: ops })
+  if (error) throw new Error(error.message)
+  return data as Applied
 }
 
 export async function leaveGroup(c: SupabaseClient, groupId: string): Promise<void> {

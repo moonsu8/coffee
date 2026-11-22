@@ -25,6 +25,13 @@ const date = (v: unknown, name: string): string => {
   return s
 }
 
+/** 행 묶음과 서버의 변경 번호(rev). rev가 없으면(0004 이전 서버) null */
+export function parseSnapshotFull(raw: unknown): { rows: GroupRows; rev: number | null } {
+  const rows = parseSnapshot(raw)
+  const rev = isObj(raw) && typeof raw.rev === 'number' ? raw.rev : null
+  return { rows, rev }
+}
+
 export function parseSnapshot(raw: unknown): GroupRows {
   if (!isObj(raw)) throw new SnapshotError('스냅샷이 비어 있어요')
   const g = raw.group

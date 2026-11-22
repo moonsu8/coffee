@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { rowsToGroup } from '../logic/remote-map'
+import { applyOps, diffGroups, rowsToGroup } from '../logic/remote-map'
 import type { Group } from '../types'
 import {
   AGE_PENDING_KEY,
   AUTH_KEY,
+  applyGroupOps,
   confirmAge,
   currentUser,
   fetchGroupRows,
@@ -20,8 +21,9 @@ import {
 } from './api'
 import { clearCache, readCache, writeCache, type CacheMap, type Role } from './cache'
 import { joinErrorMessage } from './invite'
+import { createWriter, type FailKind, type Writer, type WriteState } from './writer'
 
-/** 서버에서 읽어 온 그룹 하나 (이 앱에서는 읽기 전용) */
+/** 서버에서 읽어 온 그룹 하나 (그룹장이면 이 앱에서 수정할 수 있다) */
 export interface SharedGroup {
   group: Group
   role: Role
@@ -30,15 +32,28 @@ export interface SharedGroup {
 
 export type JoinResult = { ok: true; pending: boolean; name?: string } | { ok: false; message: string }
 
+export interface WriteStatus {
+  state: WriteState
+  message?: string
+}
+
 export interface RemoteState {
   enabled: boolean
-  /** 클라이언트를 불러와 로그인 상태를 확인했는지 (처음에는 캐시만 보여준다) */
   user: RemoteUser | null
   groups: SharedGroup[]
+  /** 기기가 인터넷에 연결돼 있다고 알려 주는지 */
+  online: boolean
   /** 마지막 갱신이 네트워크 문제로 실패했는지 (캐시를 보여주는 중) */
   offline: boolean
   refreshing: boolean
+  /** 그룹장 쓰기 상태(저장 중·실패 안내) */
+  write: WriteStatus
+  dismissWrite: () => void
   refresh: () => Promise<void>
+  /** 최신 그룹(낙관적 반영 포함). 스토어의 되돌리기가 옛 값을 쓰지 않게 한다 */
+  getGroup: (groupId: string) => Group | undefined
+  /** 그룹장 쓰기: 변경 함수를 최신 그룹에 적용해 서버에 보낸다. 쓸 수 없으면 false */
+  commitGroup: (groupId: string, mutate: (g: Group) => Group) => boolean
   join: (code: string) => Promise<JoinResult>
   signInGoogle: () => Promise<{ ok: boolean; message?: string }>
   signOut: () => Promise<void>
@@ -49,9 +64,14 @@ const OFF: RemoteState = {
   enabled: false,
   user: null,
   groups: [],
+  online: true,
   offline: false,
   refreshing: false,
+  write: { state: 'idle' },
+  dismissWrite: () => {},
   refresh: async () => {},
+  getGroup: () => undefined,
+  commitGroup: () => false,
   join: async () => ({ ok: false, message: '공유 기능을 쓸 수 없어요' }),
   signInGoogle: async () => ({ ok: false }),
   signOut: async () => {},
@@ -88,6 +108,13 @@ const toShared = (cache: CacheMap): SharedGroup[] =>
     .map((c) => ({ group: rowsToGroup(c.rows), role: c.role, fetchedAt: c.fetchedAt }))
     .sort((a, b) => (a.group.name < b.group.name ? -1 : 1))
 
+const failMessage = (kind: FailKind): string =>
+  kind === 'conflict'
+    ? '다른 기기에서 먼저 바뀌어서 최신 내용을 불러왔어요. 방금 한 변경은 반영되지 않았으니 다시 해 주세요.'
+    : kind === 'norev'
+      ? '최신 내용을 먼저 불러왔어요. 방금 한 변경은 반영되지 않았으니 다시 해 주세요.'
+      : '저장하지 못했어요. 최신 내용을 불러왔어요. 방금 한 변경은 반영되지 않았으니 다시 해 주세요.'
+
 /**
  * 공유(서버) 그룹의 상태. 환경 변수가 없으면 아무것도 하지 않는다(OFF).
  * 처음에는 저장된 캐시만 보여주고, 로그인 세션이 있을 때만 supabase-js를 불러와 갱신한다.
@@ -101,11 +128,15 @@ function Inner({ children }: { children: ReactNode }) {
   const [cache, setCache] = useState<CacheMap>(() => readCache())
   const [user, setUser] = useState<RemoteUser | null>(null)
   const [offline, setOffline] = useState(false)
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false))
   const [refreshing, setRefreshing] = useState(false)
+  const [write, setWrite] = useState<WriteStatus>({ state: 'idle' })
   const cacheRef = useRef(cache)
   cacheRef.current = cache
   const busy = useRef(false)
   const lastRun = useRef(0)
+  const writers = useRef(new Map<string, Writer>())
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
 
   const commit = useCallback((next: CacheMap) => {
     cacheRef.current = next
@@ -114,8 +145,12 @@ function Inner({ children }: { children: ReactNode }) {
     else clearCache()
   }, [])
 
+  const anyWriting = () => [...writers.current.values()].some((w) => w.busy())
+
   const refresh = useCallback(async () => {
     if (busy.current) return
+    // 저장 중인 변경이 있으면 서버 내용으로 덮어쓰지 않는다(저장이 끝난 뒤 다음 갱신 때 반영)
+    if (anyWriting()) return
     // 기기가 오프라인이라고 알려 주면 요청(재시도 포함)을 기다리지 않고 바로 캐시 표시 상태로 둔다
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setOffline(true)
@@ -136,12 +171,16 @@ function Inner({ children }: { children: ReactNode }) {
         return // 캐시를 그대로 둔다
       }
       const results = await Promise.allSettled(memberships.map((m) => fetchGroupRows(c, m.group_id)))
+      if (anyWriting()) return // 읽는 사이에 쓰기가 시작됐다면 이번 결과는 버린다
       const next: CacheMap = {}
       let failed = false
       memberships.forEach((m, i) => {
         const r = results[i]
-        if (r.status === 'fulfilled' && r.value) next[m.group_id] = { role: m.role, fetchedAt: Date.now(), rows: r.value }
-        else {
+        if (r.status === 'fulfilled' && r.value) {
+          const entry: CacheMap[string] = { role: m.role, fetchedAt: Date.now(), rows: r.value.rows }
+          if (r.value.rev !== null) entry.rev = r.value.rev
+          next[m.group_id] = entry
+        } else {
           failed = true
           const old = cacheRef.current[m.group_id]
           if (old) next[m.group_id] = { ...old, role: m.role } // 실패한 그룹은 지난 내용을 유지
@@ -157,6 +196,7 @@ function Inner({ children }: { children: ReactNode }) {
       setRefreshing(false)
     }
   }, [commit])
+  refreshRef.current = refresh
 
   // 시작: 세션/캐시/로그인 복귀 표시가 있을 때만 서버에 연결한다
   useEffect(() => {
@@ -200,19 +240,76 @@ function Inner({ children }: { children: ReactNode }) {
     }
   }, [commit, refresh])
 
-  // 앱으로 돌아왔을 때·인터넷이 다시 연결됐을 때 갱신 (너무 자주는 아니게)
+  // 앱으로 돌아왔을 때·인터넷이 다시 연결됐을 때 갱신 (너무 자주는 아니게), 연결 상태 표시
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible' && Date.now() - lastRun.current > 30_000 && Object.keys(cacheRef.current).length) void refresh()
     }
-    const onOnline = () => void refresh()
+    const onOnline = () => {
+      setOnline(true)
+      void refresh()
+    }
+    const onOffline = () => setOnline(false)
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
     }
   }, [refresh])
+
+  /** 그룹 하나의 쓰기 대기열 (서버 rev를 이어 가며 순서대로 보낸다) */
+  const writerFor = useCallback(
+    (gid: string): Writer => {
+      let w = writers.current.get(gid)
+      if (!w) {
+        w = createWriter({
+          apply: async (baseRev, ops) => applyGroupOps(await loadClient(), gid, baseRev, ops),
+          getRev: () => cacheRef.current[gid]?.rev ?? null,
+          onSaved: (rev) => {
+            const cur = cacheRef.current[gid]
+            if (cur) commit({ ...cacheRef.current, [gid]: { ...cur, rev, fetchedAt: Date.now() } })
+          },
+          onState: (state) => setWrite((p) => (state === 'failed' ? { ...p, state } : { state })),
+          onFail: (kind) => {
+            setWrite({ state: 'failed', message: failMessage(kind) })
+            // 서버의 최신 내용으로 되돌린다 (낙관적으로 먼저 보여준 변경은 취소됨)
+            setTimeout(() => void refreshRef.current(), 0)
+          },
+        })
+        writers.current.set(gid, w)
+      }
+      return w
+    },
+    [commit],
+  )
+
+  const getGroup = useCallback((gid: string): Group | undefined => {
+    const c = cacheRef.current[gid]
+    return c ? rowsToGroup(c.rows) : undefined
+  }, [])
+
+  const commitGroup = useCallback(
+    (gid: string, mutate: (g: Group) => Group): boolean => {
+      const cur = cacheRef.current[gid]
+      if (!cur || cur.role !== 'owner') return false
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setWrite({ state: 'failed', message: '인터넷에 연결되면 수정할 수 있어요. 방금 한 변경은 반영되지 않았어요.' })
+        return false
+      }
+      const before = rowsToGroup(cur.rows)
+      const after = mutate(before)
+      const ops = diffGroups(before, after)
+      if (!ops.length) return true
+      // 먼저 화면에 반영(낙관적)하고, 서버에는 순서대로 보낸다
+      commit({ ...cacheRef.current, [gid]: { ...cur, rows: applyOps(cur.rows, ops) } })
+      writerFor(gid).enqueue(ops)
+      return true
+    },
+    [commit, writerFor],
+  )
 
   const join = useCallback(
     async (code: string): Promise<JoinResult> => {
@@ -254,7 +351,9 @@ function Inner({ children }: { children: ReactNode }) {
       /* 네트워크가 없어도 이 기기의 세션은 지운다 */
     }
     safeDel(AUTH_KEY)
+    writers.current.clear()
     setUser(null)
+    setWrite({ state: 'idle' })
     commit({})
   }, [commit])
 
@@ -273,10 +372,11 @@ function Inner({ children }: { children: ReactNode }) {
     [refresh],
   )
 
+  const dismissWrite = useCallback(() => setWrite({ state: 'idle' }), [])
   const groups = useMemo(() => toShared(cache), [cache])
   const value = useMemo<RemoteState>(
-    () => ({ enabled: true, user, groups, offline, refreshing, refresh, join, signInGoogle, signOut, leave }),
-    [user, groups, offline, refreshing, refresh, join, signInGoogle, signOut, leave],
+    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, commitGroup, join, signInGoogle, signOut, leave }),
+    [user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, commitGroup, join, signInGoogle, signOut, leave],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -261,6 +261,16 @@ export function withGroupAdded(root: AppData, g: Group, now = Date.now()): AppDa
 }
 
 /** 이름·이모지·요일 변경 (빈 이름은 무시). 템플릿 설정은 바꾸지 않는다 */
+/** 그룹 한 개의 이름·이모지·요일 변경 (빈 이름·빈 이모지는 무시) */
+export function editGroup(g: Group, patch: { name?: string; emoji?: string; schedule?: Schedule }): Group {
+  return {
+    ...g,
+    name: patch.name !== undefined ? patch.name.trim() || g.name : g.name,
+    emoji: patch.emoji || g.emoji,
+    schedule: patch.schedule ? normalizeSchedule(patch.schedule) : g.schedule,
+  }
+}
+
 export function withGroupEdited(
   root: AppData,
   id: string,
@@ -269,11 +279,7 @@ export function withGroupEdited(
 ): AppData {
   return {
     ...root,
-    groups: root.groups.map((g) =>
-      g.id === id
-        ? { ...g, name: patch.name !== undefined ? patch.name.trim() || g.name : g.name, emoji: patch.emoji || g.emoji, schedule: patch.schedule ? normalizeSchedule(patch.schedule) : g.schedule }
-        : g,
-    ),
+    groups: root.groups.map((g) => (g.id === id ? editGroup(g, patch) : g)),
     updatedAt: now,
   }
 }
