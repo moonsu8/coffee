@@ -45,9 +45,9 @@ d('apply_group_ops', () => {
     return r.data as Applied
   }
 
-  it('스냅샷에 rev가 있고 처음에는 0이다', async () => {
+  it('스냅샷에 rev가 있고, 가져오기로 만든 직후에는 1이다 (0005: 가져오기가 한 번 올린다)', async () => {
     const { rev } = await makeGroup()
-    expect(rev).toBe(0)
+    expect(rev).toBe(1)
   })
 
   it('diff로 만든 작업을 적용하면 읽은 결과가 변경 후 그룹과 같다 (여러 테이블, 한 번에)', async () => {

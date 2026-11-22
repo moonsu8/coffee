@@ -15,6 +15,7 @@ import {
   leaveGroup,
   listMemberships,
   loadClient,
+  openGroupChannel,
   redeemInvite,
   remoteEnabled,
   signInAnonymously,
@@ -23,7 +24,9 @@ import {
   type RemoteUser,
 } from './api'
 import { clearCache, readCache, writeCache, type CacheMap, type Role } from './cache'
+import { findGone, type GoneNotice } from './gone'
 import { joinErrorMessage } from './invite'
+import { createRealtimeSync, type RealtimeState, type RealtimeSync } from './realtime'
 import { createWriter, type FailKind, type Writer, type WriteState } from './writer'
 
 /** 서버에서 읽어 온 그룹 하나 (그룹장이면 이 앱에서 수정할 수 있다) */
@@ -52,6 +55,11 @@ export interface RemoteState {
   /** 그룹장 쓰기 상태(저장 중·실패 안내) */
   write: WriteStatus
   dismissWrite: () => void
+  /** 실시간 변경 알림 연결 상태 (off: 구독할 그룹 없음) */
+  realtime: RealtimeState
+  /** 서버 그룹이 삭제됐거나 내가 빠져서 사라졌다는 안내 */
+  notices: GoneNotice[]
+  dismissNotice: (id: string) => void
   refresh: () => Promise<void>
   /** 최신 그룹(낙관적 반영 포함). 스토어의 되돌리기가 옛 값을 쓰지 않게 한다 */
   getGroup: (groupId: string) => Group | undefined
@@ -76,6 +84,9 @@ const OFF: RemoteState = {
   refreshing: false,
   write: { state: 'idle' },
   dismissWrite: () => {},
+  realtime: 'off',
+  notices: [],
+  dismissNotice: () => {},
   refresh: async () => {},
   getGroup: () => undefined,
   links: {},
@@ -140,6 +151,8 @@ function Inner({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false))
   const [refreshing, setRefreshing] = useState(false)
   const [write, setWrite] = useState<WriteStatus>({ state: 'idle' })
+  const [realtime, setRealtime] = useState<RealtimeState>('off')
+  const [notices, setNotices] = useState<GoneNotice[]>([])
   const [links, setLinksState] = useState<Links>(() => readLinks())
   const linksRef = useRef(links)
   const userRef = useRef<RemoteUser | null>(null)
@@ -185,6 +198,12 @@ function Inner({ children }: { children: ReactNode }) {
       }
       const results = await Promise.allSettled(memberships.map((m) => fetchGroupRows(c, m.group_id)))
       if (anyWriting()) return // 읽는 사이에 쓰기가 시작됐다면 이번 결과는 버린다
+      // 지난번에 있던 그룹이 소속 목록에서 사라졌다면(삭제·내보내기·나가기) 캐시에서 지우고 알린다
+      const gone = findGone(cacheRef.current, memberships.map((m) => m.group_id))
+      if (gone.length) {
+        gone.forEach((n) => writers.current.delete(n.id))
+        setNotices((p) => [...p.filter((x) => !gone.some((n) => n.id === x.id)), ...gone])
+      }
       const next: CacheMap = {}
       let failed = false
       memberships.forEach((m, i) => {
@@ -272,6 +291,40 @@ function Inner({ children }: { children: ReactNode }) {
       window.removeEventListener('offline', onOffline)
     }
   }, [refresh])
+
+  // 실시간 변경 알림: 내 서버 그룹들의 rev가 바뀌면 서버에서 다시 읽는다 (알림 내용은 믿지 않고 신호로만 쓴다)
+  const rtRef = useRef<RealtimeSync | null>(null)
+  const groupIdsKey = Object.keys(cache).sort().join(',')
+  useEffect(() => {
+    if (!rtRef.current) {
+      rtRef.current = createRealtimeSync({
+        open: (gid, onEvent, onStatus) => {
+          let off = () => {}
+          let closed = false
+          void loadClient()
+            .then((c) => {
+              if (!closed) off = openGroupChannel(c, gid, onEvent, onStatus)
+            })
+            .catch(() => onStatus('down'))
+          return () => {
+            closed = true
+            off()
+          }
+        },
+        getRev: (gid) => cacheRef.current[gid]?.rev,
+        refresh: () => void refreshRef.current(),
+        onState: setRealtime,
+      })
+    }
+    rtRef.current.sync(groupIdsKey ? groupIdsKey.split(',') : [])
+  }, [groupIdsKey])
+  useEffect(
+    () => () => {
+      rtRef.current?.close()
+      rtRef.current = null
+    },
+    [],
+  )
 
   /** 그룹 하나의 쓰기 대기열 (서버 rev를 이어 가며 순서대로 보낸다) */
   const writerFor = useCallback(
@@ -420,10 +473,11 @@ function Inner({ children }: { children: ReactNode }) {
   )
 
   const dismissWrite = useCallback(() => setWrite({ state: 'idle' }), [])
+  const dismissNotice = useCallback((id: string) => setNotices((p) => p.filter((n) => n.id !== id)), [])
   const groups = useMemo(() => toShared(cache), [cache])
   const value = useMemo<RemoteState>(
-    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave }),
-    [user, groups, online, offline, refreshing, write, dismissWrite, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave],
+    () => ({ enabled: true, user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave }),
+    [user, groups, online, offline, refreshing, write, dismissWrite, realtime, notices, dismissNotice, refresh, getGroup, links, shareGroup, commitGroup, join, signInGoogle, signOut, leave],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

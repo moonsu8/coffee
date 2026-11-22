@@ -152,3 +152,27 @@ export function isNetworkError(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e)
   return /fetch|network|load failed|failed to fetch/i.test(m) || (typeof navigator !== 'undefined' && navigator.onLine === false)
 }
+
+/**
+ * 그룹 하나의 변경 알림(Realtime)을 구독한다. 대상은 groups 테이블의 그 그룹 행(rev)뿐이고,
+ * 알림이 오면 호출자가 서버에서 다시 읽는다. 해제 함수를 돌려준다.
+ */
+export function openGroupChannel(
+  c: SupabaseClient,
+  groupId: string,
+  onEvent: (e: { type: 'INSERT' | 'UPDATE' | 'DELETE'; rev?: number }) => void,
+  onStatus: (s: 'live' | 'down') => void,
+): () => void {
+  const ch = c
+    .channel(`group:${groupId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'groups', filter: `id=eq.${groupId}` }, (p) => {
+      const rev = (p.new as { rev?: unknown } | undefined)?.rev
+      onEvent({ type: p.eventType as 'INSERT' | 'UPDATE' | 'DELETE', rev: typeof rev === 'number' ? rev : undefined })
+    })
+    .subscribe((status) => {
+      onStatus(status === 'SUBSCRIBED' ? 'live' : 'down')
+    })
+  return () => {
+    void c.removeChannel(ch)
+  }
+}

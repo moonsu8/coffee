@@ -11,7 +11,7 @@
 | Egress | 5 GB (+ 캐시 egress 5 GB) | https://supabase.com/pricing |
 | 월간 활성 사용자(MAU) | 50,000 | https://supabase.com/pricing |
 | 파일 저장소 | 1 GB (이 앱은 쓰지 않음) | https://supabase.com/pricing |
-| Realtime | 동시 접속 최대 200, 월 메시지 200만, 메시지 최대 256 KB | https://supabase.com/pricing |
+| Realtime | 동시 접속 200, 초당 메시지 100, 초당 채널 참여 100, 연결당 채널 100, 월 메시지 200만, 메시지 최대 256 KB, Postgres Changes 페이로드 1,024 KB(넘으면 64바이트 초과 필드가 잘림) | https://supabase.com/docs/guides/realtime/limits, https://supabase.com/pricing |
 | Edge Function 호출 | 월 50만 | https://supabase.com/pricing |
 | 무료 프로젝트 수 | 활성 2개 (일시정지된 것은 세지 않음) | https://supabase.com/docs/guides/platform/billing-on-supabase |
 | 자동 백업 | **Free는 포함되지 않음** (Pro: 7일) | https://supabase.com/pricing |
@@ -41,6 +41,7 @@
 | `supabase/migrations/0002_import_keep_ids.sql` | `import_group`이 uuid 멤버 id를 유지 | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0003_group_snapshot.sql` | `get_group_snapshot`(그룹 전체를 한 번에 읽기) | 테스트·운영 프로젝트 모두 |
 | `supabase/migrations/0004_apply_group_ops.sql` | `groups.rev`(충돌 감지) + `apply_group_ops`(그룹장 쓰기를 한 트랜잭션으로) | 테스트·운영 프로젝트 모두 |
+| `supabase/migrations/0005_rev_bump.sql` | 내용이 바뀌는 모든 경로(직접 쓰기·그룹 설정·그룹장 넘기기)에서 `groups.rev`가 오르게 하는 트리거 (Realtime 신호) | 테스트·운영 프로젝트 모두 |
 | `supabase/test-only/sentinel.sql` | "테스트 프로젝트" 표식(`is_test_project()`) | **테스트 프로젝트에만** |
 | `tests/rls/*` | RLS·RPC·왕복·스냅샷 검증 (`npm run test:rls`) | 테스트 프로젝트 |
 | `scripts/seed-test.ts` | 샘플 그룹 + 초대 코드 넣기 (`npm run seed:test`) | 테스트 프로젝트 |
@@ -51,7 +52,8 @@
 2. `0002_import_keep_ids.sql`
 3. `0003_group_snapshot.sql`
 4. `0004_apply_group_ops.sql`
-5. (테스트 프로젝트만) `test-only/sentinel.sql`
+5. `0005_rev_bump.sql`
+6. (테스트 프로젝트만) `test-only/sentinel.sql`
 
 새 마이그레이션이 생기면 번호 순서대로 이어서 적용한다. 이미 적용한 파일은 다시 Run하지 않는다(`0001`은 다시 돌리면 "already exists" 오류가 난다).
 ### 적용 확인 쿼리 (SQL Editor에서 한 줄씩 Run → 결과가 `true`(또는 13)이면 적용된 것)
@@ -61,6 +63,7 @@
 | `0002_import_keep_ids.sql` | `select position('[0-9a-f]{8}' in pg_get_functiondef('public.import_group(jsonb)'::regprocedure)) > 0 as ok;` | `true` |
 | `0003_group_snapshot.sql` | `select to_regprocedure('public.get_group_snapshot(uuid)') is not null as ok;` | `true` |
 | `0004_apply_group_ops.sql` | `select exists(select 1 from information_schema.columns where table_schema='public' and table_name='groups' and column_name='rev') and to_regprocedure('public.apply_group_ops(uuid,bigint,jsonb)') is not null as ok;` | `true` |
+| `0005_rev_bump.sql` | `select to_regprocedure('public.groups_rev_guard()') is not null and exists(select 1 from pg_trigger where tgname='records_rev_ins') and exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='groups') as ok;` | `true` |
 | `test-only/sentinel.sql` (테스트만) | `select public.is_test_project();` | `true` |
 
 새 SQL 파일을 만들 때마다 **한 줄 확인 쿼리를 이 표와 채팅에 같이 적는다**(새 함수·컬럼이 있는지 조회). "Success"만으로는 적용 여부를 알 수 없다(실제로 다른 프로젝트·다른 내용에 실행한 적이 있었다).

@@ -28,7 +28,8 @@
 - **서비스 워커**: scope를 `/`로. `autoUpdate` 동작 유지. `/.well-known/*`은 SW 캐시·navigateFallback 대상에서 제외(항상 네트워크).
 - **`.nojekyll`**: `public/.nojekyll` 추가. (Jekyll이 점(`.`)으로 시작하는 폴더인 `.well-known`을 무시하지 않게 한다. Actions 배포는 Jekyll을 쓰지 않지만 안전장치로 둔다.)
 - **`public/.well-known/assetlinks.json` 자리**: 4단계 전까지는 빈 배열 `[]`로 두고, 4단계에서 패키지명과 Play 앱 서명 지문(SHA-256)을 넣는다. 도메인 **최상위** `/.well-known/assetlinks.json`, `Content-Type: application/json`이어야 한다.
-- **초대 주소**: `https://<도메인>/?join=<6자리 코드>` (2단계). `404.html` 우회는 쓰지 않는다.
+- **초대 주소**: `https://<도메인>/?join=<8자리 코드>` (2단계). `404.html` 우회는 쓰지 않는다.
+- **초대 안내문의 "앱 주소"** (주의): 코드에 주소가 고정돼 있지 않고, 그룹장이 앱을 연 주소(`location.origin + location.pathname`)가 그대로 들어간다. 그래서 도메인이 바뀌면 코드는 고칠 필요가 없지만, **그룹장은 새 도메인에서 앱을 열어 안내문을 복사해야 한다.** `github.io` 주소에서 복사한 안내문에는 옛 주소가 들어가고, 도메인이 바뀐 뒤에는 옛 주소로 참여한 그룹원의 로그인 세션이 새 주소로 이어지지 않는다(익명 세션은 도메인 단위). 도메인이 정해지면 이미 나눠 준 옛 안내문은 새로 만든 코드로 다시 보내 준다.
 - **`index.html`/OG 메타**: 도메인 기준 canonical·공유 미리보기 주소.
 - **옛 주소**: `github.io/coffee/`는 GitHub가 새 도메인으로 리디렉트한다. 별도 처리 없음.
 - 배포는 `CLAUDE.md`의 배포 규칙(roll forward, 옛 Actions 재실행 금지)을 따른다. 데이터 구조 변경은 없다.

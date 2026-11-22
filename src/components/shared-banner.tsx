@@ -1,6 +1,7 @@
 import { Cloud, CopyX, Eye, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import { useState } from 'react'
 import { formatSyncTime } from '@/remote/format'
+import { goneMessage } from '@/remote/gone'
 import { useRemote } from '@/remote/provider'
 import { useStore } from '@/store/store'
 import { Button } from './ui/button'
@@ -22,14 +23,15 @@ export function SharedBanner() {
   const saving = owner && remote.write.state === 'saving'
 
   let icon = <Eye size={16} aria-hidden className="shrink-0" />
-  let text = `보기 전용 · 마지막 업데이트 ${at}${remote.offline ? ' (연결 안 됨)' : ''}`
+  const live = remote.realtime === 'live' && !remote.offline ? ' · 실시간' : ''
+  let text = `보기 전용 · 마지막 업데이트 ${at}${remote.offline ? ' (연결 안 됨)' : live}`
   if (owner) {
     icon = <Cloud size={16} aria-hidden className="shrink-0" />
     text = !remote.online
       ? `인터넷에 연결되면 수정할 수 있어요 · 마지막 저장 ${at}`
       : saving
         ? '저장 중…'
-        : `그룹장 · 저장됨 ${at}${remote.offline ? ' (연결 안 됨)' : ''}`
+        : `그룹장 · 저장됨 ${at}${remote.offline ? ' (연결 안 됨)' : live}`
   }
   if (failed) {
     icon = <TriangleAlert size={16} aria-hidden className="shrink-0 text-danger" />
@@ -57,6 +59,27 @@ export function SharedBanner() {
           <RefreshCw size={16} className={remote.refreshing ? 'animate-spin' : ''} />
         </button>
       )}
+    </div>
+  )
+}
+
+/** 서버 그룹이 삭제됐거나 내가 빠져서 목록에서 사라졌을 때의 안내 (어느 화면에서든 보인다) */
+export function GoneNotices() {
+  const remote = useRemote()
+  if (!remote.notices.length) return null
+  return (
+    <div className="shrink-0">
+      {remote.notices.map((n) => (
+        <div key={n.id} role="alert" className="flex items-start gap-2 border-b border-line bg-surface-2 px-4 py-2 text-[13px] font-semibold leading-snug text-ink-2">
+          <span className="mt-1.5">
+            <TriangleAlert size={16} aria-hidden className="shrink-0 text-danger" />
+          </span>
+          <span className="min-w-0 flex-1 py-1">{goneMessage(n)}</span>
+          <button onClick={() => remote.dismissNotice(n.id)} aria-label="안내 닫기" className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-black/5">
+            <X size={16} />
+          </button>
+        </div>
+      ))}
     </div>
   )
 }
