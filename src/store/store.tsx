@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AppData, DateStr, DayOrder, Group, GroupView, Member, Order, OrderItem, Purchase, Schedule, Settings, GroupConfig } from '../types'
-import { applyRecovery, EMPTY_DATA, loadInitialData, parseAppData, readActiveGroup, restoreLastGood as restoreShadow, saveData, writeActiveGroup, type Recovery } from '../lib/data'
+import { EMPTY_DATA, parseAppData, type Recovery } from '../lib/data'
+import { LOCAL_ACCESS, localRepository, type Access, type AppRepository } from '../lib/repository'
 import { formatSavedAt } from '../lib/format'
 import { Button } from '../components/ui/button'
 import { Sheet } from '../components/ui/sheet'
@@ -26,6 +27,8 @@ import { applySettingsPatch, nextSettlementDate, priceKey, upsertPrices, type Pr
 type MemberPatch = Partial<Pick<Member, 'name' | 'color' | 'emoji'>> & { favorite?: Order | null }
 
 interface Store {
+  /** 지금 보는 그룹의 저장 위치와 쓰기 권한 (로컬 그룹은 항상 쓸 수 있다) */
+  access: Access
   /** 지금 보고 있는 그룹의 데이터 (v2까지의 데이터와 같은 모양) */
   data: GroupView
   /** 저장되는 전체 데이터 (내보내기용) */
@@ -87,10 +90,10 @@ export function useStore(): Store {
   return s
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+export function StoreProvider({ children, repository = localRepository }: { children: ReactNode; repository?: AppRepository }) {
   const [root, setRoot] = useState<AppData>(EMPTY_DATA)
   // 이 기기에서 보고 있는 그룹 (데이터가 아니라 화면 상태라 데이터·섀도를 다시 쓰지 않는다)
-  const [activeId, setActiveId] = useState<string | null>(() => readActiveGroup())
+  const [activeId, setActiveId] = useState<string | null>(() => repository.readActiveGroup())
   const [ready, setReady] = useState(false)
   const [blocked, setBlocked] = useState<string | undefined>()
   // 옛 버전 앱이 덮어썼을 가능성이 있을 때: 사용자가 고르기 전까지 저장하지 않는다
@@ -103,7 +106,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const data = useMemo(() => groupToView(group), [group])
 
   useEffect(() => {
-    loadInitialData().then((r) => {
+    repository.load().then((r) => {
       setRoot(r.data)
       setBlocked(r.blocked)
       setRecovery(r.recovery)
@@ -112,8 +115,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (ready && !blocked && !recovery) saveData(root)
-  }, [root, ready, blocked, recovery])
+    if (ready && !blocked && !recovery) repository.save(root)
+  }, [root, ready, blocked, recovery, repository])
 
   // 자정을 넘기거나 앱으로 돌아왔을 때 '오늘' 갱신
   useEffect(() => {
@@ -145,6 +148,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const dayOf = (date: DateStr) => cur().orders.find((o) => o.date === date)
 
     return {
+      access: LOCAL_ACCESS,
       data,
       root,
       today,
@@ -153,7 +157,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       switchGroup: (id) => {
         if (!rootRef.current.groups.some((g) => g.id === id)) return
         setActiveId(id)
-        writeActiveGroup(id)
+        repository.writeActiveGroup(id)
       },
       addGroup: ({ name, emoji, config, schedule, memberNames }) => {
         const id = uid()
@@ -167,7 +171,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const g = newGroup(id, { name: name.trim() || '그룹', emoji, config, schedule, members })
         setRoot((r) => withGroupAdded(r, g))
         setActiveId(id)
-        writeActiveGroup(id)
+        repository.writeActiveGroup(id)
         return id
       },
       updateGroup: (id, patch) => setRoot((r) => withGroupEdited(r, id, patch)),
@@ -178,7 +182,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (group.id === id) {
           const next = res.root.groups[0]
           setActiveId(next.id)
-          writeActiveGroup(next.id)
+          repository.writeActiveGroup(next.id)
         }
         return () => setRoot((r) => withGroupRestored(r, res.removed, res.index))
       },
@@ -307,21 +311,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setRoot(parseAppData(JSON.parse(text))) // 실패(형식 오류·미래 버전)하면 throw → 호출측에서 안내
       },
       restoreLastGood: () => {
-        const restored = restoreShadow(rootRef.current)
+        const restored = repository.restoreLastGood(rootRef.current)
         if (!restored) return false
         setRoot({ ...restored, updatedAt: Date.now() })
         return true
       },
       resetToInitial: async () => {
-        try {
-          const res = await fetch(`${import.meta.env.BASE_URL}data.json`, { cache: 'no-cache' })
-          setRoot(res.ok ? parseAppData(await res.json()) : EMPTY_DATA)
-        } catch {
-          setRoot(EMPTY_DATA)
-        }
+        setRoot(await repository.loadInitial())
       },
     }
-  }, [root, today, group, data])
+  }, [root, today, group, data, repository])
 
   if (!ready) return null
   if (blocked) {
@@ -344,7 +343,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         failed={recoveryFailed}
         onChoose={(choice) => {
           if (!recovery) return
-          const r = applyRecovery(choice, recovery, rootRef.current)
+          const r = repository.applyRecovery(choice, recovery, rootRef.current)
           if (!r.ok) return setRecoveryFailed(true) // 보관에 실패하면 선택을 확정하지 않는다
           setRoot(r.data)
           setRecovery(undefined)

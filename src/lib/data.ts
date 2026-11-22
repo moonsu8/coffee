@@ -109,7 +109,8 @@ export interface LoadResult {
   recovery?: Recovery
 }
 
-async function fetchInitial(): Promise<AppData> {
+/** 배포본의 초기 데이터(data.json). 못 읽으면 빈 데이터 */
+export async function fetchInitial(): Promise<AppData> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}data.json`, { cache: 'no-cache' })
     if (res.ok) return migrate(await res.json())
